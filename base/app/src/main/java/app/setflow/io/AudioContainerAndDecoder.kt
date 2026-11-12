@@ -994,6 +994,16 @@ object AudioDecodeVerifier {
         }
     }
 
+    fun decodeToMidSide22050(
+        channel: SeekableTrackChannel,
+        container: InspectedAudioContainer? = null,
+        maxSeconds: Int = Int.MAX_VALUE,
+        cancelled: () -> Boolean = { false }
+    ): Pair<FloatArray, FloatArray> {
+        val cont = container ?: AudioContainerInspector.inspect(channel, cancelled)
+        return decodeWindowToMidSide22050(channel, cont, maxSeconds, cancelled)
+    }
+
     private fun decodeWindowToMidSide22050(
         channel: SeekableTrackChannel,
         container: InspectedAudioContainer,

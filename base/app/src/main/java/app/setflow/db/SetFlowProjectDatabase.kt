@@ -863,6 +863,40 @@ class SetFlowProjectDatabase(
         queryEdgeCompleteSnapshot(s, edgeId)!!
     }
 
+    /**
+     * Flags all transition edges referencing [trackId] as [EdgeValidationStatus.STALE_ANALYSIS]
+     * (or [EdgeValidationStatus.STALE_AUDIO_KEY] if audio key changed) following a beat-grid correction
+     * or track audio re-analysis (Stage 06).
+     * Preserves existing user overrides (D10). Returns the list of affected edge IDs.
+     */
+    fun invalidateEdgesForTrack(
+        trackId: String,
+        status: EdgeValidationStatus = EdgeValidationStatus.STALE_ANALYSIS
+    ): List<String> = driver.writeTransaction { s ->
+        val affectedEdgeIds = mutableListOf<String>()
+        s.query(
+            """
+            SELECT e.edgeId
+            FROM edges e
+            JOIN occurrences o_out ON e.outgoingOccurrenceId = o_out.occurrenceId
+            JOIN occurrences o_in ON e.incomingOccurrenceId = o_in.occurrenceId
+            WHERE o_out.trackId = ? OR o_in.trackId = ?
+            """.trimIndent(),
+            arrayOf(trackId, trackId)
+        ) { c ->
+            while (c.next()) {
+                c.getString(0)?.let { affectedEdgeIds.add(it) }
+            }
+        }
+        for (edgeId in affectedEdgeIds) {
+            s.execSql(
+                "UPDATE edges SET lastValidationStatus = ? WHERE edgeId = ?",
+                arrayOf(status.name, edgeId)
+            )
+        }
+        affectedEdgeIds
+    }
+
     // -------------------------------------------------------------------------
     // BeatGridCorrection & ExportJob CRUD (Task 1)
     // -------------------------------------------------------------------------

@@ -209,6 +209,249 @@ object SyntheticAudioFixtureGenerator {
     }
 
     /**
+     * Generates a tempo ramp fixture transitioning from [startBpm] to [endBpm] (T06 in TESTS/01_FIXTURES_AND_GENERATOR.txt).
+     * Tests segmented head and tail grid analysis where intro and outro tempos differ.
+     */
+    fun generateTempoRampWav(
+        name: String,
+        startBpm: Double = 155.0,
+        endBpm: Double = 160.0,
+        durationSec: Double = 24.0,
+        sampleRateHz: Int = 44_100,
+        channels: Int = 2
+    ): ClickFixtureMetadata {
+        val totalFrames = (durationSec * sampleRateHz).roundToLong().toInt()
+        val samples = FloatArray(totalFrames * channels)
+        val beatFrames = mutableListOf<Long>()
+        val downbeatFrames = mutableListOf<Long>()
+        val phraseFrames = mutableListOf<Long>()
+
+        // Continuous sub-bass so the track has non-zero audible bounds and onset flux
+        val subHz = 55.0
+        val twoPiSub = 2.0 * PI * subHz / sampleRateHz
+        for (f in 0 until totalFrames) {
+            val subSample = (0.20f * sin(twoPiSub * f)).toFloat()
+            for (c in 0 until channels) {
+                samples[f * channels + c] = subSample
+            }
+        }
+
+        var currentSec = 0.0
+        var beatIndex = 0
+        while (currentSec < durationSec) {
+            val progress = currentSec / durationSec
+            val currentBpm = startBpm + (endBpm - startBpm) * progress
+            val beatPeriodSec = 60.0 / currentBpm
+            val frame = (currentSec * sampleRateHz).roundToLong()
+            if (frame >= totalFrames) break
+            beatFrames.add(frame)
+            if (beatIndex % 4 == 0) downbeatFrames.add(frame)
+            if (beatIndex % 32 == 0) phraseFrames.add(frame)
+
+            // Click burst matching generateClickAndSubWav
+            val clickLen = (0.012 * sampleRateHz).toInt().coerceAtLeast(1)
+            val freqHz = if (beatIndex % 4 == 0) 1600.0 else 1000.0
+            val amp = if (beatIndex % 4 == 0) 0.75f else 0.65f
+            for (k in 0 until clickLen) {
+                val targetFrame = frame.toInt() + k
+                if (targetFrame >= totalFrames) break
+                val env = exp(-5.0 * k.toDouble() / clickLen)
+                val s = (amp * env * sin(2.0 * PI * freqHz * k / sampleRateHz)).toFloat()
+                for (c in 0 until channels) {
+                    val pos = targetFrame * channels + c
+                    samples[pos] = (samples[pos] + s).coerceIn(-0.99f, 0.99f)
+                }
+            }
+
+            currentSec += beatPeriodSec
+            beatIndex++
+        }
+
+        val wavBytes = encodePcm16ToWavBytes(samples, sampleRateHz, channels)
+        val durationUs = (totalFrames * 1_000_000L) / sampleRateHz
+        return ClickFixtureMetadata(
+            name = name,
+            bpm = (startBpm + endBpm) / 2.0,
+            sampleRateHz = sampleRateHz,
+            channels = channels,
+            totalFrames = totalFrames.toLong(),
+            durationUs = durationUs,
+            beatPeriodFrames = (sampleRateHz * 60.0 / ((startBpm + endBpm) / 2.0)),
+            beatFrameIndices = beatFrames.toLongArray(),
+            downbeatFrameIndices = downbeatFrames.toLongArray(),
+            phraseFrameIndices = phraseFrames.toLongArray(),
+            wavBytes = wavBytes
+        )
+    }
+
+    /**
+     * Generates a kickless build with a fake drop and full drop (T07 in TESTS/01_FIXTURES_AND_GENERATOR.txt).
+     */
+    fun generateKicklessBuildAndFakeDropWav(
+        name: String,
+        bpm: Double = 160.0,
+        durationSec: Double = 24.0,
+        sampleRateHz: Int = 44_100,
+        channels: Int = 2
+    ): ClickFixtureMetadata {
+        val totalFrames = (durationSec * sampleRateHz).roundToLong().toInt()
+        val samples = FloatArray(totalFrames * channels)
+        val beatPeriodSec = 60.0 / bpm
+        val beatPeriodFrames = beatPeriodSec * sampleRateHz
+
+        val beatFrames = mutableListOf<Long>()
+        val downbeatFrames = mutableListOf<Long>()
+        val phraseFrames = mutableListOf<Long>()
+
+        val introEndSec = 6.0
+        val buildEndSec = 14.0
+        val fakeDropEndSec = 16.0
+
+        var currentSec = 0.0
+        var beatIndex = 0
+        while (currentSec < durationSec) {
+            val frame = (currentSec * sampleRateHz).roundToLong()
+            if (frame >= totalFrames) break
+
+            val inBuild = currentSec in introEndSec..buildEndSec
+            val inFakeDrop = currentSec in buildEndSec..fakeDropEndSec
+            val inFullDrop = currentSec > fakeDropEndSec
+
+            if (!inFakeDrop) {
+                beatFrames.add(frame)
+                if (beatIndex % 4 == 0) downbeatFrames.add(frame)
+                if (beatIndex % 32 == 0) phraseFrames.add(frame)
+
+                val clickLen = (0.015 * sampleRateHz).toInt().coerceAtLeast(1)
+                val amp = if (inFullDrop) 0.85f else if (inBuild) 0.40f else 0.60f
+                val freq = if (inFullDrop) 140.0 else 1400.0 // Low punch in drop, high click in intro
+                for (k in 0 until clickLen) {
+                    val targetFrame = frame.toInt() + k
+                    if (targetFrame >= totalFrames) break
+                    val env = exp(-5.0 * k.toDouble() / clickLen)
+                    val s = (amp * env * sin(2.0 * PI * freq * k / sampleRateHz)).toFloat()
+                    for (c in 0 until channels) {
+                        samples[targetFrame * channels + c] = (samples[targetFrame * channels + c] + s).coerceIn(-0.99f, 0.99f)
+                    }
+                }
+            }
+
+            currentSec += beatPeriodSec
+            beatIndex++
+        }
+
+        // Riser sweep during build (introEndSec to buildEndSec)
+        val buildStartF = (introEndSec * sampleRateHz).toInt()
+        val buildEndF = (buildEndSec * sampleRateHz).toInt().coerceAtMost(totalFrames)
+        var riserPhase = 0.0
+        for (f in buildStartF until buildEndF) {
+            val progress = (f - buildStartF).toDouble() / (buildEndF - buildStartF)
+            val instHz = 220.0 + 800.0 * progress * progress
+            riserPhase += 2.0 * PI * instHz / sampleRateHz
+            val riserAmp = (0.05 + 0.35 * progress).toFloat()
+            val s = (riserAmp * sin(riserPhase)).toFloat()
+            for (c in 0 until channels) {
+                samples[f * channels + c] = (samples[f * channels + c] + s).coerceIn(-0.99f, 0.99f)
+            }
+        }
+
+        val wavBytes = encodePcm16ToWavBytes(samples, sampleRateHz, channels)
+        val durationUs = (totalFrames * 1_000_000L) / sampleRateHz
+        return ClickFixtureMetadata(
+            name = name,
+            bpm = bpm,
+            sampleRateHz = sampleRateHz,
+            channels = channels,
+            totalFrames = totalFrames.toLong(),
+            durationUs = durationUs,
+            beatPeriodFrames = beatPeriodFrames,
+            beatFrameIndices = beatFrames.toLongArray(),
+            downbeatFrameIndices = downbeatFrames.toLongArray(),
+            phraseFrameIndices = phraseFrames.toLongArray(),
+            wavBytes = wavBytes
+        )
+    }
+
+    /**
+     * Generates irregular, non-musical transients with no constant beat period (T16 in TESTS/01_FIXTURES_AND_GENERATOR.txt).
+     * Used to test [AudioErrorCode.A04_BAD_ANALYSIS] detection and time-based crossfade fallback.
+     */
+    fun generateIrregularNonMusicalWav(
+        name: String,
+        durationSec: Double = 12.0,
+        sampleRateHz: Int = 44_100,
+        channels: Int = 2
+    ): ClickFixtureMetadata {
+        val totalFrames = (durationSec * sampleRateHz).roundToLong().toInt()
+        val samples = FloatArray(totalFrames * channels)
+        val prng = java.util.Random(GENERATOR_SEED)
+
+        var f = 0
+        while (f < totalFrames) {
+            // Chaotic gap between 80 ms and 900 ms
+            val gapSec = 0.08 + 0.82 * prng.nextDouble()
+            f += (gapSec * sampleRateHz).toInt()
+            if (f >= totalFrames) break
+
+            val burstLen = (0.02 * sampleRateHz).toInt()
+            val freqHz = 300.0 + 2000.0 * prng.nextDouble()
+            for (k in 0 until burstLen) {
+                val tf = f + k
+                if (tf >= totalFrames) break
+                val env = exp(-4.0 * k.toDouble() / burstLen)
+                val s = (0.7f * env * sin(2.0 * PI * freqHz * k / sampleRateHz)).toFloat()
+                for (c in 0 until channels) {
+                    samples[tf * channels + c] = (samples[tf * channels + c] + s).coerceIn(-0.99f, 0.99f)
+                }
+            }
+        }
+
+        val wavBytes = encodePcm16ToWavBytes(samples, sampleRateHz, channels)
+        val durationUs = (totalFrames * 1_000_000L) / sampleRateHz
+        return ClickFixtureMetadata(
+            name = name,
+            bpm = 0.0,
+            sampleRateHz = sampleRateHz,
+            channels = channels,
+            totalFrames = totalFrames.toLong(),
+            durationUs = durationUs,
+            beatPeriodFrames = 0.0,
+            beatFrameIndices = longArrayOf(),
+            downbeatFrameIndices = longArrayOf(),
+            phraseFrameIndices = longArrayOf(),
+            wavBytes = wavBytes
+        )
+    }
+
+    /**
+     * Generates a completely silent audio fixture (T16 silent recording).
+     */
+    fun generateSilentWav(
+        name: String,
+        durationSec: Double = 8.0,
+        sampleRateHz: Int = 44_100,
+        channels: Int = 2
+    ): ClickFixtureMetadata {
+        val totalFrames = (durationSec * sampleRateHz).roundToLong().toInt()
+        val samples = FloatArray(totalFrames * channels)
+        val wavBytes = encodePcm16ToWavBytes(samples, sampleRateHz, channels)
+        val durationUs = (totalFrames * 1_000_000L) / sampleRateHz
+        return ClickFixtureMetadata(
+            name = name,
+            bpm = 0.0,
+            sampleRateHz = sampleRateHz,
+            channels = channels,
+            totalFrames = totalFrames.toLong(),
+            durationUs = durationUs,
+            beatPeriodFrames = 0.0,
+            beatFrameIndices = longArrayOf(),
+            downbeatFrameIndices = longArrayOf(),
+            phraseFrameIndices = longArrayOf(),
+            wavBytes = wavBytes
+        )
+    }
+
+    /**
      * Encodes interleaved float PCM [-1.0, 1.0] into a canonical 16-bit little-endian RIFF WAV byte array.
      */
     fun encodePcm16ToWavBytes(

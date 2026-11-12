@@ -11,14 +11,14 @@ android {
     namespace = "app.setflow"
     compileSdk = 37
 
-    val version = (findProperty("appVersionName") as String?) ?: "0.5.0-stage05"
+    val version = (findProperty("appVersionName") as String?) ?: "0.6.0-stage06"
 
     defaultConfig {
         applicationId = "app.setflow"
         manifestPlaceholders["appLabel"] = "SetFlow"
         minSdk = 29
         targetSdk = 36
-        versionCode = (findProperty("appVersionCode") as String?)?.toIntOrNull() ?: 5
+        versionCode = (findProperty("appVersionCode") as String?)?.toIntOrNull() ?: 6
         versionName = version
         (findProperty("abis") as String?)?.let { ndk { abiFilters += it.split(",") } }
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -102,4 +102,5 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
     testImplementation("org.xerial:sqlite-jdbc:3.41.2.2")
+    testImplementation("com.microsoft.onnxruntime:onnxruntime:1.23.2")
 }

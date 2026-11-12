@@ -76,6 +76,7 @@ data class AnalysisEngineStatus(
 
 interface AnalysisEngineContract {
     val status: StateFlow<AnalysisEngineStatus>
+    val engine: app.setflow.analysis.TrackAnalysisEngine? get() = null
 }
 
 /**
@@ -109,6 +110,7 @@ interface SetFlowServiceBoundary {
     val trackLibrary: TrackLibraryRepository
     val trackResolver: TrackResolver
     val analysisEngine: AnalysisEngineContract
+    val analysisManager: app.setflow.analysis.TrackAnalysisEngine
     val twoDeckController: TwoDeckPlaybackController
     val playbackController: PlaybackSessionController
     val diagnostics: DiagnosticsRingBuffer
@@ -279,6 +281,28 @@ class LocalOnlyShellServiceGraph(
         repo.syncLocalTracks(trackLibrary.tracks.value)
     }
 
+    private val analysisCacheDir: File = storageDirectory?.let {
+        File(it, "analysis_cache")
+    } ?: File.createTempFile("setflow_analysis_cache_", "").apply { delete(); mkdirs() }
+
+    private val trackAnalysisCache: app.setflow.analysis.TrackAnalysisCache = app.setflow.analysis.TrackAnalysisCache(
+        diskCacheDir = analysisCacheDir,
+        diagnostics = diagnostics
+    )
+
+    private val beatModelProvider: app.setflow.analysis.BeatThisModelProvider = app.setflow.analysis.BeatThisModelProvider(
+        modelAssetPath = MODEL_ASSET_RELATIVE_PATH,
+        diagnostics = diagnostics
+    )
+
+    override val analysisManager: app.setflow.analysis.TrackAnalysisEngine = app.setflow.analysis.TrackAnalysisManager(
+        database = projectDatabase,
+        sourceProvider = sourceProvider,
+        modelProvider = beatModelProvider,
+        cache = trackAnalysisCache,
+        diagnostics = diagnostics
+    )
+
     override val analysisEngine: AnalysisEngineContract = object : AnalysisEngineContract {
         private val _status = MutableStateFlow(
             AnalysisEngineStatus(
@@ -286,10 +310,12 @@ class LocalOnlyShellServiceGraph(
                 modelAssetPath = MODEL_ASSET_RELATIVE_PATH,
                 modelAssetPresent = modelAssetPresent,
                 modelAssetBytes = modelAssetBytes,
-                stageNote = "Pure Kotlin :automix + Beat This! int8 ONNX retained; Two-deck crossfade & state machine active in Stage 05."
+                stageNote = "Pure Kotlin :automix + Beat This! int8 ONNX with cache, head/tail segmentation, and manual grid correction active in Stage 06."
             )
         )
         override val status: StateFlow<AnalysisEngineStatus> = _status.asStateFlow()
+        override val engine: app.setflow.analysis.TrackAnalysisEngine
+            get() = analysisManager
     }
 
     override val twoDeckController: TwoDeckPlaybackController = TwoDeckPlaybackController(
