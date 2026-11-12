@@ -11,14 +11,14 @@ android {
     namespace = "app.setflow"
     compileSdk = 37
 
-    val version = (findProperty("appVersionName") as String?) ?: "0.4.0-stage04"
+    val version = (findProperty("appVersionName") as String?) ?: "0.5.0-stage05"
 
     defaultConfig {
         applicationId = "app.setflow"
         manifestPlaceholders["appLabel"] = "SetFlow"
         minSdk = 29
         targetSdk = 36
-        versionCode = (findProperty("appVersionCode") as String?)?.toIntOrNull() ?: 4
+        versionCode = (findProperty("appVersionCode") as String?)?.toIntOrNull() ?: 5
         versionName = version
         (findProperty("abis") as String?)?.let { ndk { abiFilters += it.split(",") } }
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

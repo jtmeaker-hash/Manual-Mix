@@ -15,6 +15,7 @@ import app.setflow.domain.SetDetailPlaceholderState
 import app.setflow.domain.SetSummary
 import app.setflow.io.TrackSourceProvider
 import app.setflow.io.VirtualSafTrackSourceProvider
+import app.setflow.playback.TwoDeckPlaybackController
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -108,6 +109,7 @@ interface SetFlowServiceBoundary {
     val trackLibrary: TrackLibraryRepository
     val trackResolver: TrackResolver
     val analysisEngine: AnalysisEngineContract
+    val twoDeckController: TwoDeckPlaybackController
     val playbackController: PlaybackSessionController
     val diagnostics: DiagnosticsRingBuffer
     val offlineOnlyEnforced: Boolean
@@ -284,33 +286,19 @@ class LocalOnlyShellServiceGraph(
                 modelAssetPath = MODEL_ASSET_RELATIVE_PATH,
                 modelAssetPresent = modelAssetPresent,
                 modelAssetBytes = modelAssetBytes,
-                stageNote = "Pure Kotlin :automix + Beat This! int8 ONNX retained; SQLite project/occurrence/edge persistence active in Stage 04."
+                stageNote = "Pure Kotlin :automix + Beat This! int8 ONNX retained; Two-deck crossfade & state machine active in Stage 05."
             )
         )
         override val status: StateFlow<AnalysisEngineStatus> = _status.asStateFlow()
     }
 
-    override val playbackController: PlaybackSessionController = object : PlaybackSessionController {
-        private val _state = MutableStateFlow(PlaybackShellState())
-        override val state: StateFlow<PlaybackShellState> = _state.asStateFlow()
+    override val twoDeckController: TwoDeckPlaybackController = TwoDeckPlaybackController(
+        database = projectDatabase,
+        diagnostics = diagnostics
+    )
 
-        override fun stopAll() {
-            val nextGen = _state.value.generation + 1L
-            _state.value = PlaybackShellState(
-                phase = SchedulerPhase.STOPPED,
-                activeOwner = AudioGraphOwner.NONE,
-                isAudioPlaying = false,
-                generation = nextGen,
-                lastError = null,
-                statusMessage = "Stopped (generation=$nextGen). Two-deck Media3 playback is not implemented in Stage 04."
-            )
-            diagnostics.record(
-                category = "PlaybackController",
-                phase = SchedulerPhase.STOPPED,
-                message = "Idempotent stopAll invoked (generation=$nextGen)"
-            )
-        }
-    }
+    override val playbackController: PlaybackSessionController
+        get() = twoDeckController
 
     init {
         diagnostics.record(
