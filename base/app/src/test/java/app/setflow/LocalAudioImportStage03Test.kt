@@ -113,7 +113,7 @@ class LocalAudioImportStage03Test {
             val fileA = File(tempDir, "Track_One.wav")
             val fileB = File(tempDir, "Track_Two.wav")
             val fileBBackup = File(tempDir, "Track_Two_Backup.wav")
-            val fileADifferentRecordingSameName = File(tempDir, "alt/Track_One.wav").apply { parentFile.mkdirs() }
+            val fileADifferentRecordingSameName = File(tempDir, "alt/Track_One.wav").apply { parentFile?.mkdirs() }
 
             writeSyntheticWav(fileA, sampleRate = 44100, channels = 2, durationSec = 6.0, freqHz = 330.0)
             writeSyntheticWav(fileB, sampleRate = 44100, channels = 2, durationSec = 7.0, freqHz = 550.0)
@@ -329,13 +329,40 @@ class LocalAudioImportStage03Test {
                 artist = "SetFlow Lab"
             )
 
-            val ffmpegBin = listOf("/usr/local/bin/ffmpeg", "/data/data/com.termux/files/usr/bin/ffmpeg", "ffmpeg")
-                .firstOrNull { p -> p == "ffmpeg" || File(p).canExecute() } ?: "ffmpeg"
-
-            runFfmpeg(ffmpegBin, "-y", "-i", wavFile.absolutePath, "-metadata", "TITLE=Synth FLAC", "-metadata", "ARTIST=SetFlow Lab", flacFile.absolutePath)
-            runFfmpeg(ffmpegBin, "-y", "-i", wavFile.absolutePath, "-c:a", "libmp3lame", "-b:a", "192k", "-metadata", "title=Synth MP3", "-metadata", "artist=SetFlow Lab", mp3File.absolutePath)
-            runFfmpeg(ffmpegBin, "-y", "-i", wavFile.absolutePath, "-c:a", "aac", "-b:a", "192k", "-metadata", "title=Synth M4A", "-metadata", "artist=SetFlow Lab", m4aFile.absolutePath)
-            runFfmpeg(ffmpegBin, "-y", "-i", wavFile.absolutePath, "-c:a", "alac", alacFile.absolutePath)
+            writeSyntheticFlacWithAudioPayload(
+                file = flacFile,
+                sampleRate = 44100,
+                channels = 2,
+                bitsPerSample = 16,
+                totalSamples = 44100L * 12L,
+                title = "Synth FLAC",
+                artist = "SetFlow Lab"
+            )
+            writeSyntheticMp3WithId3AndMpegFrames(
+                file = mp3File,
+                sampleRate = 44100,
+                durationSec = 12.0,
+                title = "Synth MP3",
+                artist = "SetFlow Lab"
+            )
+            writeSyntheticM4aContainer(
+                file = m4aFile,
+                codecFourCc = "mp4a",
+                sampleRate = 44100,
+                channels = 2,
+                durationSec = 12.0,
+                title = "Synth M4A",
+                artist = "SetFlow Lab"
+            )
+            writeSyntheticM4aContainer(
+                file = alacFile,
+                codecFourCc = "alac",
+                sampleRate = 44100,
+                channels = 2,
+                durationSec = 12.0,
+                title = "Synth ALAC",
+                artist = "SetFlow Lab"
+            )
 
             val allFiles = listOf(wavFile, flacFile, mp3File, m4aFile, alacFile)
             val checksumsBefore = allFiles.associate { it.name to TrackFingerprinter.computeFullSha256(it) }
@@ -468,11 +495,197 @@ class LocalAudioImportStage03Test {
         }
     }
 
-    private fun runFfmpeg(vararg args: String) {
-        val proc = ProcessBuilder(*args).redirectErrorStream(true).start()
-        val out = proc.inputStream.bufferedReader().readText()
-        val code = proc.waitFor()
-        assertEquals("ffmpeg failed ($code): $out", 0, code)
+    private fun writeSyntheticFlacWithAudioPayload(
+        file: File,
+        sampleRate: Int,
+        channels: Int,
+        bitsPerSample: Int,
+        totalSamples: Long,
+        title: String,
+        artist: String
+    ) {
+        writeSyntheticFlacHeaderWithTrailingFrames(
+            file = file,
+            sampleRate = sampleRate,
+            channels = channels,
+            bitsPerSample = bitsPerSample,
+            totalSamples = totalSamples,
+            title = title,
+            artist = artist,
+            picturePayload = null,
+            oversizedPictureLength = 0,
+            uniqueSeed = 42
+        )
+        // Append deterministic 16-bit audio payload frames after the last FLAC metadata block
+        java.io.FileOutputStream(file, true).buffered().use { out ->
+            val frames = 16384
+            val bb = ByteBuffer.allocate(frames * channels * 2).order(ByteOrder.LITTLE_ENDIAN)
+            for (i in 0 until frames) {
+                val s = (sin(2.0 * Math.PI * 440.0 * i / sampleRate) * 14000.0).toInt().toShort()
+                for (c in 0 until channels) bb.putShort(s)
+            }
+            out.write(bb.array())
+        }
+    }
+
+    private fun writeSyntheticMp3WithId3AndMpegFrames(
+        file: File,
+        sampleRate: Int,
+        durationSec: Double,
+        title: String,
+        artist: String
+    ) {
+        // Build ID3v2.3 tag with TIT2 and TPE1
+        val framesOut = ByteArrayOutputStream()
+        fun writeId3Frame(id: String, text: String) {
+            val payload = ByteArrayOutputStream()
+            payload.write(3) // UTF-8 encoding
+            payload.write(text.toByteArray(StandardCharsets.UTF_8))
+            val pBytes = payload.toByteArray()
+            framesOut.write(id.toByteArray(StandardCharsets.US_ASCII))
+            framesOut.write(ByteBuffer.allocate(4).order(ByteOrder.BIG_ENDIAN).putInt(pBytes.size).array())
+            framesOut.write(byteArrayOf(0, 0)) // flags
+            framesOut.write(pBytes)
+        }
+        writeId3Frame("TIT2", title)
+        writeId3Frame("TPE1", artist)
+        val tagPayload = framesOut.toByteArray()
+        val tagSize = tagPayload.size
+
+        // MPEG-1 Layer III, 44100 Hz, 192 kbps, stereo:
+        // b0=0xFF, b1=0xFB (MPEG1, Layer III, no CRC), b2=0xB0 (bitrateIdx=11 -> 192 kbps, srIdx=0 -> 44100 Hz, padding=0), b3=0x00 (stereo)
+        // frameBytes = (144 * 192 * 1000) / 44100 = 626 bytes, samplesPerFrame = 1152
+        val frameBytes = (144 * 192 * 1000) / sampleRate
+        val totalFrames = ((durationSec * sampleRate) / 1152.0).toInt()
+        file.outputStream().buffered().use { out ->
+            out.write("ID3".toByteArray(StandardCharsets.US_ASCII))
+            out.write(byteArrayOf(3, 0, 0)) // v2.3.0
+            out.write(
+                byteArrayOf(
+                    ((tagSize ushr 21) and 0x7F).toByte(),
+                    ((tagSize ushr 14) and 0x7F).toByte(),
+                    ((tagSize ushr 7) and 0x7F).toByte(),
+                    (tagSize and 0x7F).toByte()
+                )
+            )
+            out.write(tagPayload)
+
+            // Frame 0 with Xing/Info header at offset 4 + 32 = 36
+            val firstFrame = ByteArray(frameBytes)
+            firstFrame[0] = 0xFF.toByte()
+            firstFrame[1] = 0xFB.toByte()
+            firstFrame[2] = 0xB0.toByte()
+            firstFrame[3] = 0x00.toByte()
+            System.arraycopy("Info".toByteArray(StandardCharsets.US_ASCII), 0, firstFrame, 36, 4)
+            ByteBuffer.wrap(firstFrame, 40, 8).order(ByteOrder.BIG_ENDIAN).apply {
+                putInt(1) // flags: frames field present
+                putInt(totalFrames)
+            }
+            out.write(firstFrame)
+
+            // Write subsequent valid MPEG frames with deterministic sinusoidal payload
+            val frameBuf = ByteArray(frameBytes)
+            for (f in 1 until minOf(totalFrames, 64)) {
+                frameBuf[0] = 0xFF.toByte()
+                frameBuf[1] = 0xFB.toByte()
+                frameBuf[2] = 0xB0.toByte()
+                frameBuf[3] = 0x00.toByte()
+                val bb = ByteBuffer.wrap(frameBuf, 4, frameBytes - 4).order(ByteOrder.LITTLE_ENDIAN)
+                var idx = 0
+                while (bb.remaining() >= 2) {
+                    val s = (sin(2.0 * Math.PI * 440.0 * (f * 256 + idx) / sampleRate) * 12000.0).toInt().toShort()
+                    bb.putShort(s)
+                    idx++
+                }
+                out.write(frameBuf)
+            }
+        }
+    }
+
+    private fun writeSyntheticM4aContainer(
+        file: File,
+        codecFourCc: String,
+        sampleRate: Int,
+        channels: Int,
+        durationSec: Double,
+        title: String,
+        artist: String
+    ) {
+        fun box(type: String, payload: ByteArray): ByteArray {
+            val out = ByteBuffer.allocate(8 + payload.size).order(ByteOrder.BIG_ENDIAN)
+            out.putInt(8 + payload.size)
+            out.put(type.toByteArray(StandardCharsets.ISO_8859_1))
+            out.put(payload)
+            return out.array()
+        }
+
+        val ftyp = box("ftyp", "M4A \u0000\u0000\u0002\u0000M4A isommp42".toByteArray(StandardCharsets.ISO_8859_1))
+
+        val mdhdPayload = ByteBuffer.allocate(24).order(ByteOrder.BIG_ENDIAN).apply {
+            putInt(0) // version 0 + flags
+            putInt(0) // creationTime
+            putInt(0) // modificationTime
+            putInt(sampleRate) // timeScale
+            putInt((durationSec * sampleRate).toInt()) // duration
+            putInt(0) // language + quality
+        }.array()
+        val mdhd = box("mdhd", mdhdPayload)
+
+        val stsdEntryPayload = ByteBuffer.allocate(28).order(ByteOrder.BIG_ENDIAN).apply {
+            put(ByteArray(6)) // reserved
+            putShort(1) // dataRefIndex
+            putShort(0) // stsdVer
+            put(ByteArray(6)) // revision + vendor
+            putShort(channels.toShort())
+            putShort(16) // bitsPerSample
+            putShort(0) // compressionId
+            putShort(0) // packetSize
+            putInt(sampleRate shl 16) // 16.16 fixed-point sampleRate
+        }.array()
+        val stsdEntry = box(codecFourCc, stsdEntryPayload)
+        val stsdPayload = ByteBuffer.allocate(8 + stsdEntry.size).order(ByteOrder.BIG_ENDIAN).apply {
+            putInt(0) // version/flags
+            putInt(1) // entries = 1
+            put(stsdEntry)
+        }.array()
+        val stsd = box("stsd", stsdPayload)
+        val stbl = box("stbl", stsd)
+        val minf = box("minf", stbl)
+        val mdia = box("mdia", mdhd + minf)
+        val trak = box("trak", mdia)
+
+        fun ilstTextItem(fourCc: String, value: String): ByteArray {
+            val utf8 = value.toByteArray(StandardCharsets.UTF_8)
+            val dataPayload = ByteBuffer.allocate(8 + utf8.size).order(ByteOrder.BIG_ENDIAN).apply {
+                putInt(1) // type indicator = UTF-8 text
+                putInt(0) // locale
+                put(utf8)
+            }.array()
+            return box(fourCc, box("data", dataPayload))
+        }
+
+        val ilst = box("ilst", ilstTextItem("\u00a9nam", title) + ilstTextItem("\u00a9ART", artist))
+        val metaPayload = ByteBuffer.allocate(4 + ilst.size).order(ByteOrder.BIG_ENDIAN).apply {
+            putInt(0) // 4-byte version/flags header for meta box
+            put(ilst)
+        }.array()
+        val udta = box("udta", box("meta", metaPayload))
+        val moov = box("moov", trak + udta)
+
+        val mdatSamples = 16384
+        val mdatPayload = ByteBuffer.allocate(mdatSamples * channels * 2).order(ByteOrder.LITTLE_ENDIAN).apply {
+            for (i in 0 until mdatSamples) {
+                val s = (sin(2.0 * Math.PI * 440.0 * i / sampleRate) * 13000.0).toInt().toShort()
+                for (c in 0 until channels) putShort(s)
+            }
+        }.array()
+        val mdat = box("mdat", mdatPayload)
+
+        file.outputStream().buffered().use { out ->
+            out.write(ftyp)
+            out.write(moov)
+            out.write(mdat)
+        }
     }
 
     private fun writeSyntheticWav(

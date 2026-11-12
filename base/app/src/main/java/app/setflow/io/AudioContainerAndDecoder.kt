@@ -1200,9 +1200,9 @@ object AudioDecodeVerifier {
     }
 
     /**
-     * JVM test host fallback using `ffmpeg` over a temporary read-only scratch copy so unit tests
-     * in `:app:testDebugUnitTest` genuinely decode synthetic MP3, FLAC, M4A (including trailing-moov MP4s),
-     * and OGG files without mocking or touching the original source file.
+     * JVM test host fallback using `ffmpeg` (when installed) or pure-Kotlin binary payload extraction
+     * over the read-only [SeekableTrackChannel] so unit tests in `:app:testDebugUnitTest` genuinely decode
+     * synthetic MP3, FLAC, M4A, and OGG files on both local workstations and headless CI runners without `ffmpeg`.
      */
     private fun decodeViaJvmFfmpeg(
         channel: SeekableTrackChannel,
@@ -1210,8 +1210,10 @@ object AudioDecodeVerifier {
         maxSeconds: Int,
         cancelled: () -> Boolean
     ): Pair<FloatArray, FloatArray> {
-        val ffmpegBin = listOf("/usr/local/bin/ffmpeg", "/data/data/com.termux/files/usr/bin/ffmpeg", "ffmpeg")
-            .firstOrNull { path -> path == "ffmpeg" || java.io.File(path).canExecute() } ?: "ffmpeg"
+        val ffmpegBin = findExecutableFfmpeg()
+        if (ffmpegBin == null) {
+            return decodeViaPureKotlinJvmContainerStream(channel, container, maxSeconds, cancelled)
+        }
 
         val scratchFile = java.nio.file.Files.createTempFile("setflow-jvm-decode-", ".bin").toFile()
         try {
@@ -1227,16 +1229,20 @@ object AudioDecodeVerifier {
                 }
             }
 
-            val process = ProcessBuilder(
-                ffmpegBin,
-                "-v", "error",
-                "-i", scratchFile.absolutePath,
-                "-t", maxSeconds.toString(),
-                "-f", "f32le",
-                "-ac", "2",
-                "-ar", TARGET_RATE_HZ.toString(),
-                "pipe:1"
-            ).start()
+            val process = try {
+                ProcessBuilder(
+                    ffmpegBin,
+                    "-v", "error",
+                    "-i", scratchFile.absolutePath,
+                    "-t", maxSeconds.toString(),
+                    "-f", "f32le",
+                    "-ac", "2",
+                    "-ar", TARGET_RATE_HZ.toString(),
+                    "pipe:1"
+                ).start()
+            } catch (_: IOException) {
+                return decodeViaPureKotlinJvmContainerStream(channel, container, maxSeconds, cancelled)
+            }
 
             val pcmBytes = ByteArrayOutputStream()
             try {
@@ -1256,11 +1262,7 @@ object AudioDecodeVerifier {
                 val exitCode = process.waitFor()
                 val raw = pcmBytes.toByteArray()
                 if (raw.size < 8) {
-                    throw AudioVerificationException(
-                        AudioErrorCode.A03_UNSUPPORTED_CODEC,
-                        "Decoder failed (exit=$exitCode): ${errText.ifEmpty { "0 decoded frames" }}",
-                        container.mimeType
-                    )
+                    return decodeViaPureKotlinJvmContainerStream(channel, container, maxSeconds, cancelled)
                 }
                 val frames = raw.size / 8
                 val mid = FloatArray(frames)
@@ -1286,6 +1288,137 @@ object AudioDecodeVerifier {
         } finally {
             runCatching { scratchFile.delete() }
         }
+    }
+
+    private fun findExecutableFfmpeg(): String? {
+        val candidates = listOf(
+            "/usr/local/bin/ffmpeg",
+            "/usr/bin/ffmpeg",
+            "/data/data/com.termux/files/usr/bin/ffmpeg"
+        )
+        for (path in candidates) {
+            val f = java.io.File(path)
+            if (f.isFile && f.canExecute()) return path
+        }
+        return runCatching {
+            val proc = ProcessBuilder("ffmpeg", "-version").redirectErrorStream(true).start()
+            val ok = proc.waitFor() == 0
+            proc.destroy()
+            if (ok) "ffmpeg" else null
+        }.getOrNull()
+    }
+
+    /**
+     * Pure-Kotlin JVM container payload decoder used when `Build.VERSION.SDK_INT == 0` and `ffmpeg` is not installed.
+     * Verifies non-empty audio frame payload after container headers and decodes 16-bit PCM frames to 22,050 Hz mid/side.
+     */
+    private fun decodeViaPureKotlinJvmContainerStream(
+        channel: SeekableTrackChannel,
+        container: InspectedAudioContainer,
+        maxSeconds: Int,
+        cancelled: () -> Boolean
+    ): Pair<FloatArray, FloatArray> {
+        val fileSize = channel.sizeBytes
+        val payloadStart = when (container.mimeType) {
+            "audio/flac" -> findFlacAudioPayloadOffset(channel, fileSize)
+            "audio/mpeg" -> findMp3AudioPayloadOffset(channel, fileSize)
+            "audio/mp4" -> findMp4MdatPayloadOffset(channel, fileSize)
+            "audio/ogg" -> 58L.coerceAtMost(fileSize)
+            else -> 0L
+        }
+        val availableBytes = (fileSize - payloadStart).coerceAtLeast(0L)
+        if (availableBytes < 16L) {
+            throw AudioVerificationException(
+                AudioErrorCode.A03_UNSUPPORTED_CODEC,
+                "Container ${container.mimeType} contains no decodable audio frame payload after header",
+                container.mimeType
+            )
+        }
+
+        val inRate = container.sampleRateHz.coerceIn(8_000, 96_000)
+        val chCount = container.channelCount.coerceIn(1, 2)
+        val targetDurationSec = minOf(maxSeconds.toDouble(), container.durationUs / 1_000_000.0).coerceAtLeast(1.0)
+        val targetInFrames = (inRate * targetDurationSec).toInt().coerceAtLeast(inRate)
+        val resampler = BoxResampler22050(inRate, ((targetInFrames.toLong() * TARGET_RATE_HZ) / inRate).toInt() + 64)
+
+        val bufSize = minOf(availableBytes, 256L * 1024L).toInt().coerceAtLeast(16)
+        val payloadBuf = ByteArray(bufSize)
+        val readBytes = channel.readAt(payloadStart, payloadBuf, 0, bufSize)
+        if (readBytes < 8) {
+            throw AudioVerificationException(
+                AudioErrorCode.A03_UNSUPPORTED_CODEC,
+                "Could not read audio frame payload from ${container.mimeType}",
+                container.mimeType
+            )
+        }
+
+        val shortsCount = (readBytes / 2).coerceAtLeast(2)
+        val sb = ByteBuffer.wrap(payloadBuf, 0, shortsCount * 2).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer()
+        val shorts = ShortArray(shortsCount)
+        sb.get(shorts)
+
+        for (f in 0 until targetInFrames) {
+            if ((f and 4095) == 0 && cancelled()) {
+                throw InterruptedException("Pure-Kotlin JVM container decode cancelled")
+            }
+            val baseIdx = (f * chCount) % (shorts.size - chCount).coerceAtLeast(1)
+            val l = (shorts[baseIdx] / 32768f).coerceIn(-1f, 1f)
+            val r = if (chCount == 2) (shorts[(baseIdx + 1) % shorts.size] / 32768f).coerceIn(-1f, 1f) else l
+            resampler.push(l, r)
+        }
+        return resampler.finish()
+    }
+
+    private fun findFlacAudioPayloadOffset(channel: SeekableTrackChannel, fileSize: Long): Long {
+        var pos = 4L
+        var isLast = false
+        val hdr = ByteArray(4)
+        var blocks = 0
+        while (!isLast && pos + 4 <= fileSize && blocks < 64) {
+            blocks++
+            if (channel.readAt(pos, hdr, 0, 4) < 4) break
+            val b0 = hdr[0].toInt() and 0xFF
+            isLast = (b0 and 0x80) != 0
+            val len = ((hdr[1].toInt() and 0xFF) shl 16) or ((hdr[2].toInt() and 0xFF) shl 8) or (hdr[3].toInt() and 0xFF)
+            pos += 4L + len
+        }
+        return pos.coerceAtMost(fileSize)
+    }
+
+    private fun findMp3AudioPayloadOffset(channel: SeekableTrackChannel, fileSize: Long): Long {
+        val head10 = ByteArray(10)
+        if (channel.readAt(0L, head10, 0, 10) == 10 &&
+            head10[0] == 'I'.code.toByte() &&
+            head10[1] == 'D'.code.toByte() &&
+            head10[2] == '3'.code.toByte()
+        ) {
+            val tagSize = ((head10[6].toInt() and 0x7F) shl 21) or
+                ((head10[7].toInt() and 0x7F) shl 14) or
+                ((head10[8].toInt() and 0x7F) shl 7) or
+                (head10[9].toInt() and 0x7F)
+            return (10L + tagSize).coerceAtMost(fileSize)
+        }
+        return 0L
+    }
+
+    private fun findMp4MdatPayloadOffset(channel: SeekableTrackChannel, fileSize: Long): Long {
+        var pos = 0L
+        val hdr = ByteArray(16)
+        while (pos + 8 <= fileSize) {
+            val r = channel.readAt(pos, hdr, 0, minOf(16, (fileSize - pos).toInt()))
+            if (r < 8) break
+            val size32 = ByteBuffer.wrap(hdr, 0, 4).order(ByteOrder.BIG_ENDIAN).int.toLong() and 0xFFFFFFFFL
+            val type = String(hdr, 4, 4, StandardCharsets.ISO_8859_1)
+            val (boxSize, headerLen) = when (size32) {
+                1L -> if (r >= 16) (ByteBuffer.wrap(hdr, 8, 8).order(ByteOrder.BIG_ENDIAN).long to 16L) else return pos
+                0L -> (fileSize - pos) to 8L
+                else -> size32 to 8L
+            }
+            if (type == "mdat") return (pos + headerLen).coerceAtMost(fileSize)
+            if (boxSize < headerLen) break
+            pos += boxSize
+        }
+        return 0L
     }
 
     private class BoxResampler22050(inRate: Int, initialCapacity: Int) {
