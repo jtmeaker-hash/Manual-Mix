@@ -1,12 +1,50 @@
 # build outputs
 build/
+**/build/
 .gradle/
+**/.gradle/
 .kotlin/
+**/.kotlin/
 *.apk
+*.aab
+*.apks
 *.zip
 *.log
 dist/
 local.properties
+base/local.properties
+
+# model & analysis caches
+.automix-bench/
+**/.automix-bench/
+cache/automix4/
+**/cache/automix4/
+
+# private music & audio test captures (never commit user/copyrighted audio)
+*.mp3
+*.flac
+*.wav
+*.m4a
+*.ogg
+*.opus
+*.aac
+*.f32
+
+# keystore, signing & secret tokens
+keystore/
+base/keystore/
+*.jks
+*.keystore
+keystore.properties
+*.pem
+*.p12
+.env
+.env.*
+*.secret
+*.token
+secrets.properties
+tokens.json
+
 # device captures (logs can contain session data)
 tools/captures/
 base/tools/captures/
