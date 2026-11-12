@@ -1,9 +1,15 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 package app.setflow.service
 
+import app.setflow.db.ProjectBackupManager
+import app.setflow.db.ProjectDetailSnapshot
+import app.setflow.db.SetFlowProjectDatabase
+import app.setflow.db.SetFlowSchemaAndMigrations
+import app.setflow.db.TrackEntity
 import app.setflow.domain.AudioErrorCode
 import app.setflow.domain.AudioGraphOwner
 import app.setflow.domain.DiagnosticsRingBuffer
+import app.setflow.domain.LocalTrackRecord
 import app.setflow.domain.SchedulerPhase
 import app.setflow.domain.SetDetailPlaceholderState
 import app.setflow.domain.SetSummary
@@ -38,11 +44,22 @@ interface TrackResolver {
 }
 
 /**
- * Read/write boundary for DJ sets (Room persistence implemented in Stage 04).
+ * Read/write boundary for DJ sets backed by SQLite persistence (Stage 04).
  */
 interface SetRepository {
     val sets: StateFlow<List<SetSummary>>
     fun getSetDetailPlaceholder(setId: String): SetDetailPlaceholderState
+    fun getProjectDetail(setId: String): ProjectDetailSnapshot?
+    fun createSet(name: String): ProjectDetailSnapshot
+    fun renameSet(setId: String, expectedRevision: Long, newName: String): ProjectDetailSnapshot
+    fun duplicateSet(setId: String, newName: String? = null): ProjectDetailSnapshot
+    fun deleteSet(setId: String, expectedRevision: Long)
+    fun addTracksToSet(setId: String, expectedRevision: Long, trackIds: List<String>): ProjectDetailSnapshot
+    fun reorderSetOccurrences(setId: String, expectedRevision: Long, newOrderedOccurrenceIds: List<String>): ProjectDetailSnapshot
+    fun removeSetOccurrence(setId: String, expectedRevision: Long, occurrenceId: String): ProjectDetailSnapshot
+    fun undoLastSetChange(setId: String, expectedRevision: Long): ProjectDetailSnapshot
+    fun syncLocalTracks(tracks: List<LocalTrackRecord>)
+    fun refreshSets()
 }
 
 /**
@@ -62,7 +79,7 @@ interface AnalysisEngineContract {
 
 /**
  * Explicit local-only playback shell state owned outside Activity.
- * Stage 03 does not play audio and never pretends to play audio.
+ * Stage 04 does not play audio and never pretends to play audio.
  */
 data class PlaybackShellState(
     val phase: SchedulerPhase = SchedulerPhase.IDLE,
@@ -85,6 +102,8 @@ interface PlaybackSessionController {
  * Application-scoped service boundary container (no Activity references, no network or account state).
  */
 interface SetFlowServiceBoundary {
+    val projectDatabase: SetFlowProjectDatabase
+    val backupManager: ProjectBackupManager
     val setRepository: SetRepository
     val trackLibrary: TrackLibraryRepository
     val trackResolver: TrackResolver
@@ -96,7 +115,129 @@ interface SetFlowServiceBoundary {
 }
 
 /**
- * Default local-only service boundary implementation (Stage 02 shell + Stage 03 local audio import/relink).
+ * SQLite-backed implementation of [SetRepository] (Stage 04).
+ */
+class SqliteSetRepository(
+    private val database: SetFlowProjectDatabase
+) : SetRepository {
+
+    private val _sets = MutableStateFlow<List<SetSummary>>(emptyList())
+    override val sets: StateFlow<List<SetSummary>> = _sets.asStateFlow()
+
+    init {
+        if (database.openMode == app.setflow.db.DatabaseOpenMode.READ_WRITE &&
+            database.listProjects(includeDeleted = true).isEmpty()
+        ) {
+            database.createProject(
+                name = "Starter Local Set",
+                projectId = DEFAULT_STARTER_SET_ID
+            )
+        }
+        refreshSets()
+    }
+
+    override fun refreshSets() {
+        val projects = database.listProjects(includeDeleted = false)
+        _sets.value = projects.map { p ->
+            val detail = database.getProjectDetail(p.projectId)
+            val occCount = detail?.occurrences?.size ?: 0
+            val edgeCount = detail?.edges?.size ?: 0
+            SetSummary(
+                setId = p.projectId,
+                title = p.name,
+                trackCount = occCount,
+                revision = p.editRevision,
+                statusNote = "Persisted SQLite set • $occCount occurrence(s) • $edgeCount transition edge(s)"
+            )
+        }
+    }
+
+    override fun getSetDetailPlaceholder(setId: String): SetDetailPlaceholderState {
+        val detail = database.getProjectDetail(setId)
+        val occCount = detail?.occurrences?.size ?: 0
+        val edgeCount = detail?.edges?.size ?: 0
+        return SetDetailPlaceholderState(
+            setId = setId,
+            title = detail?.project?.name ?: "Set ($setId)",
+            revision = detail?.project?.editRevision ?: 1L,
+            notImplementedBanner = "Persisted $occCount occurrence(s) and $edgeCount transition edge(s) in SQLite. Not implemented in Stage 04: Two-deck Media3 playback (Stage 05), Beat grid analysis cache (Stage 06), Saved transition editor (Stage 07–09), and Offline WAV Export (Stage 11). Audio playback is inactive.",
+            isAudioPlaying = false
+        )
+    }
+
+    override fun getProjectDetail(setId: String): ProjectDetailSnapshot? =
+        database.getProjectDetail(setId)
+
+    override fun createSet(name: String): ProjectDetailSnapshot {
+        val created = database.createProject(name = name)
+        refreshSets()
+        return database.getProjectDetail(created.projectId)!!
+    }
+
+    override fun renameSet(setId: String, expectedRevision: Long, newName: String): ProjectDetailSnapshot {
+        database.renameProject(setId, expectedRevision, newName)
+        refreshSets()
+        return database.getProjectDetail(setId)!!
+    }
+
+    override fun duplicateSet(setId: String, newName: String?): ProjectDetailSnapshot {
+        val dup = database.duplicateProject(setId, newName)
+        refreshSets()
+        return dup
+    }
+
+    override fun deleteSet(setId: String, expectedRevision: Long) {
+        database.softDeleteProject(setId, expectedRevision)
+        refreshSets()
+    }
+
+    override fun addTracksToSet(setId: String, expectedRevision: Long, trackIds: List<String>): ProjectDetailSnapshot {
+        val updated = database.addTracksToProject(setId, expectedRevision, trackIds)
+        refreshSets()
+        return updated
+    }
+
+    override fun reorderSetOccurrences(
+        setId: String,
+        expectedRevision: Long,
+        newOrderedOccurrenceIds: List<String>
+    ): ProjectDetailSnapshot {
+        val updated = database.reorderOccurrences(setId, expectedRevision, newOrderedOccurrenceIds)
+        refreshSets()
+        return updated
+    }
+
+    override fun removeSetOccurrence(
+        setId: String,
+        expectedRevision: Long,
+        occurrenceId: String
+    ): ProjectDetailSnapshot {
+        val updated = database.removeOccurrence(setId, expectedRevision, occurrenceId)
+        refreshSets()
+        return updated
+    }
+
+    override fun undoLastSetChange(setId: String, expectedRevision: Long): ProjectDetailSnapshot {
+        val updated = database.undoLastStructuralChange(setId, expectedRevision)
+        refreshSets()
+        return updated
+    }
+
+    override fun syncLocalTracks(tracks: List<LocalTrackRecord>) {
+        if (database.openMode != app.setflow.db.DatabaseOpenMode.READ_WRITE) return
+        for (record in tracks) {
+            database.upsertTrack(TrackEntity.fromLocalTrackRecord(record))
+        }
+        refreshSets()
+    }
+
+    companion object {
+        const val DEFAULT_STARTER_SET_ID = "sample-shell-set-01"
+    }
+}
+
+/**
+ * Default local-only service boundary implementation (Stages 02–04).
  */
 class LocalOnlyShellServiceGraph(
     modelAssetPresent: Boolean = true,
@@ -109,6 +250,20 @@ class LocalOnlyShellServiceGraph(
     override val offlineOnlyEnforced: Boolean = true
     override val accountRequired: Boolean = false
 
+    private val dbFile: File = storageDirectory?.let {
+        File(it, "setflow_projects_v3.db")
+    } ?: File.createTempFile("setflow_shell_db_", ".sqlite").apply { deleteOnExit() }
+
+    override val projectDatabase: SetFlowProjectDatabase = SetFlowProjectDatabase(
+        driver = SetFlowSchemaAndMigrations.createDriver(dbFile),
+        diagnostics = diagnostics
+    )
+
+    override val backupManager: ProjectBackupManager = ProjectBackupManager(
+        database = projectDatabase,
+        diagnostics = diagnostics
+    )
+
     override val trackLibrary: TrackLibraryRepository = LocalTrackLibraryService(
         sourceProvider = sourceProvider,
         diagnostics = diagnostics,
@@ -118,30 +273,8 @@ class LocalOnlyShellServiceGraph(
     override val trackResolver: TrackResolver
         get() = trackLibrary
 
-    override val setRepository: SetRepository = object : SetRepository {
-        private val sampleSets = MutableStateFlow(
-            listOf(
-                SetSummary(
-                    setId = "sample-shell-set-01",
-                    title = "Stage 03 Preview Set (Room Persistence in Stage 04)",
-                    trackCount = 0,
-                    revision = 1L,
-                    statusNote = "SAF local audio import & relinking active in Stage 03; Room project DB arrives in Stage 04"
-                )
-            )
-        )
-        override val sets: StateFlow<List<SetSummary>> = sampleSets.asStateFlow()
-
-        override fun getSetDetailPlaceholder(setId: String): SetDetailPlaceholderState {
-            val found = sampleSets.value.firstOrNull { it.setId == setId }
-            return SetDetailPlaceholderState(
-                setId = setId,
-                title = found?.title ?: "Set ($setId)",
-                revision = found?.revision ?: 1L,
-                notImplementedBanner = "Not implemented in Stage 03: Room database (Stage 04), Two-deck Media3 playback (Stage 05), Beat grid analysis cache (Stage 06), Saved transitions (Stage 07), Set Builder UI (Stage 08), DSP Preview (Stage 09), and Offline WAV Export (Stage 11). Audio playback is inactive.",
-                isAudioPlaying = false
-            )
-        }
+    override val setRepository: SetRepository = SqliteSetRepository(projectDatabase).also { repo ->
+        repo.syncLocalTracks(trackLibrary.tracks.value)
     }
 
     override val analysisEngine: AnalysisEngineContract = object : AnalysisEngineContract {
@@ -151,7 +284,7 @@ class LocalOnlyShellServiceGraph(
                 modelAssetPath = MODEL_ASSET_RELATIVE_PATH,
                 modelAssetPresent = modelAssetPresent,
                 modelAssetBytes = modelAssetBytes,
-                stageNote = "Pure Kotlin :automix + Beat This! int8 ONNX retained; 10s decode + audioKey verification active in Stage 03."
+                stageNote = "Pure Kotlin :automix + Beat This! int8 ONNX retained; SQLite project/occurrence/edge persistence active in Stage 04."
             )
         )
         override val status: StateFlow<AnalysisEngineStatus> = _status.asStateFlow()
@@ -169,7 +302,7 @@ class LocalOnlyShellServiceGraph(
                 isAudioPlaying = false,
                 generation = nextGen,
                 lastError = null,
-                statusMessage = "Stopped (generation=$nextGen). Two-deck Media3 playback is not implemented in Stage 03."
+                statusMessage = "Stopped (generation=$nextGen). Two-deck Media3 playback is not implemented in Stage 04."
             )
             diagnostics.record(
                 category = "PlaybackController",
@@ -183,7 +316,7 @@ class LocalOnlyShellServiceGraph(
         diagnostics.record(
             category = "Startup",
             phase = SchedulerPhase.IDLE,
-            message = "SetFlow cold start: offlineOnly=true, accountRequired=false, modelAssetPresent=$modelAssetPresent"
+            message = "SetFlow cold start: offlineOnly=true, accountRequired=false, modelAssetPresent=$modelAssetPresent, dbSchemaVersion=${projectDatabase.schemaVersion}"
         )
     }
 

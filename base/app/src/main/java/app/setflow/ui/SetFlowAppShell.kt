@@ -92,8 +92,8 @@ fun SetFlowAppShell(
                     title = {
                         Text(
                             text = when {
-                                currentDestination.startsWith("set_detail/") -> "SetFlow • Set Detail (Placeholder)"
-                                currentDestination == SetFlowRoute.Settings.routePattern -> "SetFlow • Settings (Placeholder)"
+                                currentDestination.startsWith("set_detail/") -> "SetFlow • Set Detail"
+                                currentDestination == SetFlowRoute.Settings.routePattern -> "SetFlow • Settings"
                                 else -> "SetFlow • Sets & Local Audio"
                             }
                         )
@@ -161,6 +161,9 @@ fun SetFlowAppShell(
                         onVerifyAllTracks = { viewModel.controller.verifyAllTracks() },
                         onConfirmRelink = { viewModel.controller.confirmPendingRelink(userConfirmedUncertainMatch = true) },
                         onDismissRelink = { viewModel.controller.dismissPendingRelink() },
+                        onCreateSet = { viewModel.controller.createNewSet("Set #${state.sets.size + 1}") },
+                        onDuplicateSet = { setId -> viewModel.controller.duplicateSet(setId) },
+                        onDeleteSet = { setId, rev -> viewModel.controller.deleteSet(setId, rev) },
                         onOpenSetDetail = { setId ->
                             viewModel.controller.openSetDetail(setId)
                             navController.navigate(SetFlowRoute.SetDetail(setId).routePattern)
@@ -179,6 +182,26 @@ fun SetFlowAppShell(
                     SetDetailPlaceholderScreen(
                         setId = setId,
                         state = state,
+                        onAddTrackToSet = { trackId ->
+                            val rev = state.activeProjectDetail?.project?.editRevision ?: 1L
+                            viewModel.controller.addTrackToSet(setId, rev, trackId)
+                        },
+                        onMoveOccurrenceUp = { occId ->
+                            val rev = state.activeProjectDetail?.project?.editRevision ?: 1L
+                            viewModel.controller.moveOccurrence(setId, rev, occId, -1)
+                        },
+                        onMoveOccurrenceDown = { occId ->
+                            val rev = state.activeProjectDetail?.project?.editRevision ?: 1L
+                            viewModel.controller.moveOccurrence(setId, rev, occId, +1)
+                        },
+                        onRemoveOccurrence = { occId ->
+                            val rev = state.activeProjectDetail?.project?.editRevision ?: 1L
+                            viewModel.controller.removeOccurrenceFromSet(setId, rev, occId)
+                        },
+                        onUndoStructuralChange = {
+                            val rev = state.activeProjectDetail?.project?.editRevision ?: 1L
+                            viewModel.controller.undoLastSetStructuralChange(setId, rev)
+                        },
                         onBackToSets = {
                             viewModel.controller.openSets()
                             navController.popBackStack(SetFlowRoute.Sets.routePattern, inclusive = false)
@@ -202,6 +225,9 @@ private fun SetsAndLocalTracksScreen(
     onVerifyAllTracks: () -> Unit,
     onConfirmRelink: () -> Unit,
     onDismissRelink: () -> Unit,
+    onCreateSet: () -> Unit,
+    onDuplicateSet: (String) -> Unit,
+    onDeleteSet: (String, Long) -> Unit,
     onOpenSetDetail: (String) -> Unit,
     onOpenSettings: () -> Unit
 ) {
@@ -218,12 +244,12 @@ private fun SetsAndLocalTracksScreen(
         ) {
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    text = "Stage 03 — Local Audio Import, Identity & Relink",
+                    text = "Stage 04 — Crash-Safe Set & Transition Persistence",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold
                 )
                 Text(
-                    text = "Offline-first • Zero network permissions • Non-destructive SAF read access.",
+                    text = "Offline-first • SQLite v3 migrated storage • Adjacency-scoped edges • SAF local audio.",
                     style = MaterialTheme.typography.bodyMedium
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -235,7 +261,7 @@ private fun SetsAndLocalTracksScreen(
                     }
                 }
                 Text(
-                    text = "Note: Two-deck audio playback, waveform preview, and Room set persistence are NOT IMPLEMENTED in Stage 03 (Stages 04–10). Audio is inactive.",
+                    text = "Note: Two-deck audio playback and interactive waveform transition editing are NOT IMPLEMENTED in Stage 04 (Stages 05–10). Audio is inactive.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.primary
                 )
@@ -287,6 +313,59 @@ private fun SetsAndLocalTracksScreen(
             )
         }
 
+        // Persisted DJ Sets Section (Stage 04 Task 8)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = "Persisted DJ Sets (${state.sets.size})",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+            OutlinedButton(onClick = onCreateSet) {
+                Text("New Set")
+            }
+        }
+        state.sets.forEach { setItem ->
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .semantics { contentDescription = "Persisted set ${setItem.title}" }
+            ) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = setItem.title,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = "Occurrences: ${setItem.trackCount} • Revision: ${setItem.revision}",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Text(
+                        text = setItem.statusNote,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = { onOpenSetDetail(setItem.setId) }) {
+                            Text("Open Set")
+                        }
+                        OutlinedButton(onClick = { onDuplicateSet(setItem.setId) }) {
+                            Text("Duplicate")
+                        }
+                        if (state.sets.size > 1) {
+                            OutlinedButton(onClick = { onDeleteSet(setItem.setId, setItem.revision) }) {
+                                Text("Delete")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // Imported Local Tracks Section
         Text(
             text = "Local Track Library (${state.tracks.size})",
@@ -312,41 +391,6 @@ private fun SetsAndLocalTracksScreen(
                     track = track,
                     onRelinkClick = { onLaunchSafRelinkPicker(track.trackId) }
                 )
-            }
-        }
-
-        // Sets list placeholder section
-        Text(
-            text = "DJ Sets (Stage 04 Room Persistence Placeholder)",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold
-        )
-        state.sets.forEach { setItem ->
-            Card(
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .semantics { contentDescription = "Placeholder set ${setItem.title}" }
-            ) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        text = setItem.title,
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Text(
-                        text = "Tracks: ${setItem.trackCount} • Revision: ${setItem.revision}",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    Text(
-                        text = setItem.statusNote,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Button(onClick = { onOpenSetDetail(setItem.setId) }) {
-                        Text("Inspect Set Detail Placeholder")
-                    }
-                }
             }
         }
 
@@ -476,9 +520,15 @@ private fun formatDurationUs(durationUs: Long): String {
 private fun SetDetailPlaceholderScreen(
     setId: String,
     state: SetFlowShellUiState,
+    onAddTrackToSet: (String) -> Unit,
+    onMoveOccurrenceUp: (String) -> Unit,
+    onMoveOccurrenceDown: (String) -> Unit,
+    onRemoveOccurrence: (String) -> Unit,
+    onUndoStructuralChange: () -> Unit,
     onBackToSets: () -> Unit
 ) {
-    val detail = state.activeSetDetail
+    val detailPlaceholder = state.activeSetDetail
+    val projectDetail = state.activeProjectDetail
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -492,34 +542,140 @@ private fun SetDetailPlaceholderScreen(
         ) {
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    text = detail?.title ?: "Set Detail ($setId)",
+                    text = projectDetail?.project?.name ?: detailPlaceholder?.title ?: "Set Detail ($setId)",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold
                 )
                 Text(
-                    text = "NOT IMPLEMENTED IN STAGE 03",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                Text(
-                    text = detail?.notImplementedBanner
-                        ?: "Set Detail, Transition Editor, and Playback are not implemented yet.",
-                    style = MaterialTheme.typography.bodyMedium
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "Playback state: ${state.playbackState.phase} • Audio playing: ${state.playbackState.isAudioPlaying}",
+                    text = "Revision: ${projectDetail?.project?.editRevision ?: detailPlaceholder?.revision ?: 1L} • Occurrences: ${projectDetail?.occurrences?.size ?: 0} • Edges: ${projectDetail?.edges?.size ?: 0}",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.secondary
                 )
                 Text(
-                    text = "No fake play/waveform/transition controls are shown until their audio and persistence gates pass in Stages 04–10.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    text = detailPlaceholder?.notImplementedBanner
+                        ?: "Transition Editor and Playback are not implemented yet.",
+                    style = MaterialTheme.typography.bodySmall
                 )
+                if (projectDetail?.canUndo == true) {
+                    OutlinedButton(onClick = onUndoStructuralChange) {
+                        Text("Undo Last Reorder / Removal")
+                    }
+                }
             }
         }
 
+        // Occurrences & Adjacency-Scoped Transition Edge Placeholders (Stage 04 Task 8)
+        val occurrences = projectDetail?.occurrences.orEmpty()
+        val edgesByPair = projectDetail?.edges.orEmpty().associateBy {
+            it.edge.outgoingOccurrenceId to it.edge.incomingOccurrenceId
+        }
+
+        if (occurrences.isEmpty()) {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "No track occurrences in this set yet. Add an imported track below.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        } else {
+            occurrences.forEachIndexed { index, occWithTrack ->
+                val occ = occWithTrack.occurrence
+                val track = occWithTrack.track
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            text = "#${occ.positionIndex + 1} • ${track.title} — ${track.artist}",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = "Occurrence ID: ${occ.occurrenceId.take(16)}… • Track ID: ${occ.trackId.take(16)}… • State: ${track.availabilityState}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            if (index > 0) {
+                                OutlinedButton(onClick = { onMoveOccurrenceUp(occ.occurrenceId) }) {
+                                    Text("Move Up")
+                                }
+                            }
+                            if (index < occurrences.lastIndex) {
+                                OutlinedButton(onClick = { onMoveOccurrenceDown(occ.occurrenceId) }) {
+                                    Text("Move Down")
+                                }
+                            }
+                            OutlinedButton(onClick = { onRemoveOccurrence(occ.occurrenceId) }) {
+                                Text("Remove")
+                            }
+                        }
+                    }
+                }
+
+                // Render adjacency-scoped transition placeholder between occ[index] and occ[index + 1]
+                if (index < occurrences.lastIndex) {
+                    val nextOcc = occurrences[index + 1].occurrence
+                    val edgeSnap = edgesByPair[occ.occurrenceId to nextOcc.occurrenceId]
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(
+                                text = "Transition Edge Placeholder (#${index + 1} → #${index + 2})",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Text(
+                                text = "Edge ID: ${edgeSnap?.edge?.edgeId?.take(16) ?: "none"}… • Origin: ${edgeSnap?.edge?.origin ?: "AUTO"} • PlanRev: ${edgeSnap?.edge?.planRevision ?: 1L} • Status: ${edgeSnap?.edge?.lastValidationStatus ?: "UNRESOLVED"}",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            Text(
+                                text = "Adjacency-scoped to (${occ.occurrenceId.take(10)}… → ${nextOcc.occurrenceId.take(10)}…). Interactive transition editor & audio preview arrive in Stages 07–10.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // Add imported tracks to set (supports adding the same track multiple times as distinct occurrences)
+        if (state.tracks.isNotEmpty()) {
+            Text(
+                text = "Add Imported Track to Set",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold
+            )
+            state.tracks.forEach { track ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "${track.title} (${formatDurationUs(track.durationUs)})",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(vertical = 8.dp)
+                    )
+                    OutlinedButton(onClick = { onAddTrackToSet(track.trackId) }) {
+                        Text("Append Occurrence")
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(4.dp))
         OutlinedButton(onClick = onBackToSets) {
             Text("Back to Sets")
         }
@@ -583,7 +739,7 @@ private fun SettingsPlaceholderScreen(state: SetFlowShellUiState) {
                     color = MaterialTheme.colorScheme.primary
                 )
                 Text(
-                    text = "Audio output sample-rate policy, transition defaults, and user-initiated diagnostic file export are not implemented in Stage 03.",
+                    text = "Audio output sample-rate policy, transition defaults, and user-initiated diagnostic file export are not implemented in Stage 04.",
                     style = MaterialTheme.typography.bodySmall
                 )
             }

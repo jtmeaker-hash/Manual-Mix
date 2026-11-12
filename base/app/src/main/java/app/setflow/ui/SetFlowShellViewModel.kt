@@ -3,6 +3,7 @@ package app.setflow.ui
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
+import app.setflow.db.ProjectDetailSnapshot
 import app.setflow.domain.DiagnosticEvent
 import app.setflow.domain.ImportItemOutcome
 import app.setflow.domain.ImportProgressState
@@ -21,7 +22,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 /**
- * Navigation routes in the standalone local-only shell (Stages 02–03).
+ * Navigation routes in the standalone local-only shell (Stages 02–04).
  */
 sealed interface SetFlowRoute {
     val routePattern: String
@@ -55,13 +56,14 @@ data class SetFlowShellUiState(
     val importProgress: ImportProgressState = ImportProgressState(),
     val pendingRelinkEvaluation: RelinkCandidateEvaluation? = null,
     val activeSetDetail: SetDetailPlaceholderState? = null,
+    val activeProjectDetail: ProjectDetailSnapshot? = null,
     val playbackState: PlaybackShellState = PlaybackShellState(),
     val analysisStatus: AnalysisEngineStatus = AnalysisEngineStatus(
         engineRetained = true,
         modelAssetPath = LocalOnlyShellServiceGraph.MODEL_ASSET_RELATIVE_PATH,
         modelAssetPresent = true,
         modelAssetBytes = 5_596_894L,
-        stageNote = "Stage 03 local import"
+        stageNote = "Stage 04 SQLite persistence"
     ),
     val offlineOnlyEnforced: Boolean = true,
     val accountRequired: Boolean = false,
@@ -86,7 +88,7 @@ class SetFlowShellController(
         val next = current + SetFlowRoute.SetDetail(setId)
         services.diagnostics.record(
             category = "Navigation",
-            message = "Opened SetDetail placeholder for setId=$setId"
+            message = "Opened SetDetail for setId=$setId"
         )
         updateStack(next)
     }
@@ -96,7 +98,7 @@ class SetFlowShellController(
         val next = if (current.lastOrNull() == SetFlowRoute.Settings) current else current + SetFlowRoute.Settings
         services.diagnostics.record(
             category = "Navigation",
-            message = "Opened Settings placeholder"
+            message = "Opened Settings"
         )
         updateStack(next)
     }
@@ -116,6 +118,73 @@ class SetFlowShellController(
         refreshSnapshot()
     }
 
+    // -------------------------------------------------------------------------
+    // Stage 04 Persisted Set & Occurrence Actions
+    // -------------------------------------------------------------------------
+
+    fun createNewSet(name: String): ProjectDetailSnapshot {
+        val detail = services.setRepository.createSet(name)
+        refreshSnapshot()
+        return detail
+    }
+
+    fun duplicateSet(setId: String): ProjectDetailSnapshot {
+        val detail = services.setRepository.duplicateSet(setId)
+        refreshSnapshot()
+        return detail
+    }
+
+    fun deleteSet(setId: String, expectedRevision: Long) {
+        services.setRepository.deleteSet(setId, expectedRevision)
+        refreshSnapshot()
+    }
+
+    fun addTrackToSet(setId: String, expectedRevision: Long, trackId: String): ProjectDetailSnapshot {
+        services.setRepository.syncLocalTracks(services.trackLibrary.tracks.value)
+        val detail = services.setRepository.addTracksToSet(setId, expectedRevision, listOf(trackId))
+        refreshSnapshot()
+        return detail
+    }
+
+    fun moveOccurrence(
+        setId: String,
+        expectedRevision: Long,
+        occurrenceId: String,
+        delta: Int
+    ): ProjectDetailSnapshot? {
+        val detail = services.setRepository.getProjectDetail(setId) ?: return null
+        val ids = detail.occurrences.map { it.occurrence.occurrenceId }.toMutableList()
+        val idx = ids.indexOf(occurrenceId)
+        if (idx < 0) return detail
+        val targetIdx = (idx + delta).coerceIn(0, ids.lastIndex)
+        if (targetIdx == idx) return detail
+        val item = ids.removeAt(idx)
+        ids.add(targetIdx, item)
+        val updated = services.setRepository.reorderSetOccurrences(setId, expectedRevision, ids)
+        refreshSnapshot()
+        return updated
+    }
+
+    fun removeOccurrenceFromSet(
+        setId: String,
+        expectedRevision: Long,
+        occurrenceId: String
+    ): ProjectDetailSnapshot {
+        val updated = services.setRepository.removeSetOccurrence(setId, expectedRevision, occurrenceId)
+        refreshSnapshot()
+        return updated
+    }
+
+    fun undoLastSetStructuralChange(setId: String, expectedRevision: Long): ProjectDetailSnapshot {
+        val updated = services.setRepository.undoLastSetChange(setId, expectedRevision)
+        refreshSnapshot()
+        return updated
+    }
+
+    // -------------------------------------------------------------------------
+    // Stage 03 Local Track Import & Relink Actions
+    // -------------------------------------------------------------------------
+
     fun importLocalUris(
         uriStrings: List<String>,
         intentFlags: Int = TrackLibraryRepository.DEFAULT_SAF_GRANT_FLAGS,
@@ -126,6 +195,7 @@ class SetFlowShellController(
             intentFlags = intentFlags,
             importSource = importSource
         )
+        services.setRepository.syncLocalTracks(services.trackLibrary.tracks.value)
         refreshSnapshot()
         return outcomes
     }
@@ -137,6 +207,7 @@ class SetFlowShellController(
 
     fun verifyAllTracks(): List<LocalTrackRecord> {
         val verified = services.trackLibrary.verifyAllTracks()
+        services.setRepository.syncLocalTracks(verified)
         refreshSnapshot()
         return verified
     }
@@ -153,6 +224,7 @@ class SetFlowShellController(
             intentFlags = intentFlags,
             autoApplyOnExactMatch = autoApplyOnExactMatch
         )
+        services.setRepository.syncLocalTracks(services.trackLibrary.tracks.value)
         refreshSnapshot()
         return eval
     }
@@ -160,6 +232,7 @@ class SetFlowShellController(
     fun confirmPendingRelink(userConfirmedUncertainMatch: Boolean): LocalTrackRecord? {
         val pending = services.trackLibrary.pendingRelinkEvaluation.value ?: return null
         val updated = services.trackLibrary.confirmRelink(pending, userConfirmedUncertainMatch)
+        services.setRepository.syncLocalTracks(services.trackLibrary.tracks.value)
         refreshSnapshot()
         return updated
     }
@@ -179,8 +252,11 @@ class SetFlowShellController(
 
     private fun buildSnapshot(stack: List<SetFlowRoute>): SetFlowShellUiState {
         val top = stack.lastOrNull() ?: SetFlowRoute.Sets
-        val detail = (top as? SetFlowRoute.SetDetail)?.let {
+        val detailPlaceholder = (top as? SetFlowRoute.SetDetail)?.let {
             services.setRepository.getSetDetailPlaceholder(it.setId)
+        }
+        val projectDetail = (top as? SetFlowRoute.SetDetail)?.let {
+            services.setRepository.getProjectDetail(it.setId)
         }
         return SetFlowShellUiState(
             currentRoute = top,
@@ -189,7 +265,8 @@ class SetFlowShellController(
             tracks = services.trackLibrary.tracks.value,
             importProgress = services.trackLibrary.importProgress.value,
             pendingRelinkEvaluation = services.trackLibrary.pendingRelinkEvaluation.value,
-            activeSetDetail = detail,
+            activeSetDetail = detailPlaceholder,
+            activeProjectDetail = projectDetail,
             playbackState = services.playbackController.state.value,
             analysisStatus = services.analysisEngine.status.value,
             offlineOnlyEnforced = services.offlineOnlyEnforced,

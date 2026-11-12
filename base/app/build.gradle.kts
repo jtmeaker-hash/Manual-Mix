@@ -11,14 +11,14 @@ android {
     namespace = "app.setflow"
     compileSdk = 37
 
-    val version = (findProperty("appVersionName") as String?) ?: "0.3.0-stage03"
+    val version = (findProperty("appVersionName") as String?) ?: "0.4.0-stage04"
 
     defaultConfig {
         applicationId = "app.setflow"
         manifestPlaceholders["appLabel"] = "SetFlow"
         minSdk = 29
         targetSdk = 36
-        versionCode = (findProperty("appVersionCode") as String?)?.toIntOrNull() ?: 3
+        versionCode = (findProperty("appVersionCode") as String?)?.toIntOrNull() ?: 4
         versionName = version
         (findProperty("abis") as String?)?.let { ndk { abiFilters += it.split(",") } }
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -91,6 +91,9 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
     implementation(libs.serialization.json)
 
+    // Room annotations & SQLite persistence (Stage 04, ADR-002)
+    implementation("androidx.room:room-common:2.7.0")
+
     // Local Media3 playback & decoding (no DASH/network streaming libraries)
     implementation("androidx.media3:media3-exoplayer:1.8.0")
     implementation("androidx.media3:media3-datasource:1.8.0")
@@ -98,4 +101,5 @@ dependencies {
     // Unit testing
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
+    testImplementation("org.xerial:sqlite-jdbc:3.41.2.2")
 }
