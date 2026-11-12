@@ -9,6 +9,7 @@ import app.myspoti.automix.segue.SegueValidator
 import app.myspoti.automix.segue.SegueViolation
 import app.setflow.domain.AudioErrorCode
 import app.setflow.domain.DiagnosticsRingBuffer
+import app.setflow.domain.SchedulerPhase
 import app.setflow.domain.TrackAvailabilityState
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -315,6 +316,24 @@ class SetFlowProjectDatabase(
 
     fun getProjectDetail(projectId: String): ProjectDetailSnapshot? = driver.read { s ->
         queryProjectDetail(s, projectId)
+    }
+
+    /**
+     * Resolves the complete snapshot (edge entity + auto plan + override + resolved plan) for [edgeId].
+     */
+    fun getEdgeCompleteSnapshot(edgeId: String): EdgeCompleteSnapshot? = driver.read { s ->
+        queryEdgeCompleteSnapshot(s, edgeId)
+    }
+
+    /**
+     * Resolves the outgoing and incoming [TrackEntity] pair referenced by [edgeId].
+     */
+    fun getEdgeSideTracks(edgeId: String): Pair<TrackEntity, TrackEntity>? = driver.read { s ->
+        val edge = queryEdgeById(s, edgeId) ?: return@read null
+        val detail = queryProjectDetail(s, edge.projectId) ?: return@read null
+        val outOcc = detail.occurrences.firstOrNull { it.occurrence.occurrenceId == edge.outgoingOccurrenceId } ?: return@read null
+        val inOcc = detail.occurrences.firstOrNull { it.occurrence.occurrenceId == edge.incomingOccurrenceId } ?: return@read null
+        Pair(outOcc.track, inOcc.track)
     }
 
     // -------------------------------------------------------------------------
@@ -815,6 +834,106 @@ class SetFlowProjectDatabase(
             }
             throw t
         }
+    }
+
+    /**
+     * Resets a custom transition edge back to [EdgeOrigin.AUTO] (Task 5, STAGES/07_SAVED_TRANSITIONS.txt).
+     * Clears the user [OverrideSnapshotEntity], restores the latest [AutoPlanSnapshotEntity]
+     * if present, updates edge revision atomically, and increments project editRevision.
+     */
+    fun resetEdgeToAuto(
+        edgeId: String,
+        expectedEdgePlanRevision: Long? = null,
+        expectedProjectRevision: Long? = null
+    ): EdgeCompleteSnapshot = driver.writeTransaction { s ->
+        val edge = queryEdgeById(s, edgeId)
+            ?: throw OptimisticConcurrencyException(
+                entityType = "Edge",
+                entityId = edgeId,
+                expectedRevision = expectedEdgePlanRevision ?: -1L,
+                actualRevision = -1L
+            )
+
+        val project = queryProjectById(s, edge.projectId)
+            ?: throw IllegalStateException("Project ${edge.projectId} missing for edge $edgeId")
+
+        if (expectedEdgePlanRevision != null && edge.planRevision != expectedEdgePlanRevision) {
+            throw OptimisticConcurrencyException(
+                entityType = "Edge",
+                entityId = edgeId,
+                expectedRevision = expectedEdgePlanRevision,
+                actualRevision = edge.planRevision
+            )
+        }
+
+        if (expectedProjectRevision != null && project.editRevision != expectedProjectRevision) {
+            throw OptimisticConcurrencyException(
+                entityType = "Project",
+                entityId = project.projectId,
+                expectedRevision = expectedProjectRevision,
+                actualRevision = project.editRevision
+            )
+        }
+
+        val now = clockUtcMs()
+        val nextPlanRev = edge.planRevision + 1L
+
+        // 1. Delete OverrideSnapshot
+        s.execSql("DELETE FROM override_snapshots WHERE edgeId = ?", arrayOf(edgeId))
+
+        // 2. Query AutoPlanSnapshot
+        val autoPlan = queryAutoPlanSnapshot(s, edgeId)
+        val (planHash, validationStatus) = if (autoPlan != null) {
+            val parsed = runCatching { SegueCodec.decode(autoPlan.planCanonicalJson) }.getOrNull()
+            val hash = parsed?.let { SegueCodec.fingerprint(it) } ?: ""
+            // Restore resolved plan from auto plan
+            upsertResolvedPlanSnapshot(
+                s,
+                ResolvedPlanSnapshotEntity(
+                    edgeId = edgeId,
+                    resolutionRevision = nextPlanRev,
+                    canonicalSegueJson = autoPlan.planCanonicalJson,
+                    planHashSha256 = hash,
+                    sourceKeys = "${autoPlan.analysisKeyA}:${autoPlan.analysisKeyB}",
+                    warnings = "",
+                    validatedAtUtc = now
+                )
+            )
+            Pair(hash, EdgeValidationStatus.VALID)
+        } else {
+            s.execSql("DELETE FROM resolved_plan_snapshots WHERE edgeId = ?", arrayOf(edgeId))
+            Pair("", EdgeValidationStatus.UNRESOLVED)
+        }
+
+        // 3. Update Edge
+        s.execSql(
+            """
+            UPDATE edges
+            SET planRevision = ?, origin = ?, lastResolvedFingerprint = ?, lastValidationStatus = ?
+            WHERE edgeId = ?
+            """.trimIndent(),
+            arrayOf(
+                nextPlanRev,
+                EdgeOrigin.AUTO.name,
+                planHash,
+                validationStatus.name,
+                edgeId
+            )
+        )
+
+        // 4. Update Project editRevision
+        s.execSql(
+            "UPDATE projects SET updatedAtUtc = ?, editRevision = ? WHERE projectId = ?",
+            arrayOf(now, project.editRevision + 1L, project.projectId)
+        )
+
+        diagnostics?.record(
+            category = "SetFlowDB",
+            phase = SchedulerPhase.IDLE,
+            message = "Reset edge $edgeId back to AUTO plan (rev $nextPlanRev)"
+        )
+
+        queryEdgeCompleteSnapshot(s, edgeId)!!
     }
 
     /**

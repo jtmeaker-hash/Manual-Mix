@@ -111,6 +111,7 @@ interface SetFlowServiceBoundary {
     val trackResolver: TrackResolver
     val analysisEngine: AnalysisEngineContract
     val analysisManager: app.setflow.analysis.TrackAnalysisEngine
+    val transitionManager: app.setflow.transition.TransitionOverrideManager
     val twoDeckController: TwoDeckPlaybackController
     val playbackController: PlaybackSessionController
     val diagnostics: DiagnosticsRingBuffer
@@ -300,6 +301,11 @@ class LocalOnlyShellServiceGraph(
         sourceProvider = sourceProvider,
         modelProvider = beatModelProvider,
         cache = trackAnalysisCache,
+        diagnostics = diagnostics
+    )
+
+    override val transitionManager: app.setflow.transition.TransitionOverrideManager = app.setflow.transition.TransitionOverrideManager(
+        database = projectDatabase,
         diagnostics = diagnostics
     )
 
