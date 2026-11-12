@@ -36,7 +36,7 @@ jobs:
       # testDebugUnitTest, the JVM modules (extensions, api-spotify, host-cdp) run test.
       # The live tests in host-cdp skip themselves without a browser to drive.
       - name: Unit tests
-        run: ./gradlew :app:testDebugUnitTest :host-android:testDebugUnitTest :extensions:test :api-spotify:test :host-cdp:test
+        run: ./gradlew :automix:test :app:testDebugUnitTest --stacktrace --console=plain
 
       - name: Test reports
         if: ${{ failure() }}
