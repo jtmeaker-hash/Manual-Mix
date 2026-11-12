@@ -49,6 +49,9 @@ import app.setflow.BuildConfig
 import app.setflow.domain.LocalTrackRecord
 import app.setflow.domain.RelinkCandidateEvaluation
 import app.setflow.domain.TrackAvailabilityState
+import androidx.activity.compose.BackHandler
+import app.setflow.ui.setdetail.SetDetailScreen
+import app.setflow.ui.transition.TransitionEditorScreen
 import java.util.Locale
 
 private val SetFlowDarkColors = darkColorScheme(
@@ -75,6 +78,13 @@ fun SetFlowAppShell(
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = navBackStackEntry?.destination?.route ?: SetFlowRoute.Sets.routePattern
+    val isTransitionEditor = currentDestination.startsWith("transition_editor/")
+
+    BackHandler(enabled = isTransitionEditor) {
+        if (viewModel.controller.requestCloseTransitionEditor()) {
+            navController.popBackStack()
+        }
+    }
 
     LaunchedEffect(state.currentRoute) {
         val target = state.currentRoute.routePattern
@@ -88,60 +98,64 @@ fun SetFlowAppShell(
     MaterialTheme(colorScheme = SetFlowDarkColors) {
         Scaffold(
             topBar = {
-                TopAppBar(
-                    title = {
-                        Text(
-                            text = when {
-                                currentDestination.startsWith("set_detail/") -> "SetFlow • Set Detail"
-                                currentDestination == SetFlowRoute.Settings.routePattern -> "SetFlow • Settings"
-                                else -> "SetFlow • Sets & Local Audio"
-                            }
-                        )
-                    },
-                    navigationIcon = {
-                        if (currentDestination != SetFlowRoute.Sets.routePattern) {
-                            IconButton(
-                                onClick = {
-                                    if (!viewModel.controller.navigateBack()) {
-                                        viewModel.controller.openSets()
-                                    }
-                                    navController.popBackStack()
+                if (!isTransitionEditor) {
+                    TopAppBar(
+                        title = {
+                            Text(
+                                text = when {
+                                    currentDestination.startsWith("set_detail/") -> "SetFlow • Set Detail"
+                                    currentDestination == SetFlowRoute.Settings.routePattern -> "SetFlow • Settings"
+                                    else -> "SetFlow • Sets & Local Audio"
                                 }
-                            ) {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                    contentDescription = "Navigate back"
-                                )
+                            )
+                        },
+                        navigationIcon = {
+                            if (currentDestination != SetFlowRoute.Sets.routePattern) {
+                                IconButton(
+                                    onClick = {
+                                        if (!viewModel.controller.navigateBack()) {
+                                            viewModel.controller.openSets()
+                                        }
+                                        navController.popBackStack()
+                                    }
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                        contentDescription = "Navigate back"
+                                    )
+                                }
                             }
                         }
-                    }
-                )
+                    )
+                }
             },
             bottomBar = {
-                NavigationBar {
-                    NavigationBarItem(
-                        selected = currentDestination == SetFlowRoute.Sets.routePattern || currentDestination.startsWith("set_detail/"),
-                        onClick = {
-                            viewModel.controller.openSets()
-                            navController.navigate(SetFlowRoute.Sets.routePattern) {
-                                popUpTo(SetFlowRoute.Sets.routePattern) { inclusive = false }
-                                launchSingleTop = true
-                            }
-                        },
-                        icon = { Icon(Icons.Default.LibraryMusic, contentDescription = "Sets") },
-                        label = { Text("Sets") }
-                    )
-                    NavigationBarItem(
-                        selected = currentDestination == SetFlowRoute.Settings.routePattern,
-                        onClick = {
-                            viewModel.controller.openSettings()
-                            navController.navigate(SetFlowRoute.Settings.routePattern) {
-                                launchSingleTop = true
-                            }
-                        },
-                        icon = { Icon(Icons.Default.Settings, contentDescription = "Settings") },
-                        label = { Text("Settings") }
-                    )
+                if (!isTransitionEditor) {
+                    NavigationBar {
+                        NavigationBarItem(
+                            selected = currentDestination == SetFlowRoute.Sets.routePattern || currentDestination.startsWith("set_detail/"),
+                            onClick = {
+                                viewModel.controller.openSets()
+                                navController.navigate(SetFlowRoute.Sets.routePattern) {
+                                    popUpTo(SetFlowRoute.Sets.routePattern) { inclusive = false }
+                                    launchSingleTop = true
+                                }
+                            },
+                            icon = { Icon(Icons.Default.LibraryMusic, contentDescription = "Sets") },
+                            label = { Text("Sets") }
+                        )
+                        NavigationBarItem(
+                            selected = currentDestination == SetFlowRoute.Settings.routePattern,
+                            onClick = {
+                                viewModel.controller.openSettings()
+                                navController.navigate(SetFlowRoute.Settings.routePattern) {
+                                    launchSingleTop = true
+                                }
+                            },
+                            icon = { Icon(Icons.Default.Settings, contentDescription = "Settings") },
+                            label = { Text("Settings") }
+                        )
+                    }
                 }
             }
         ) { innerPadding ->
@@ -150,7 +164,7 @@ fun SetFlowAppShell(
                 startDestination = SetFlowRoute.Sets.routePattern,
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(innerPadding)
+                    .padding(if (isTransitionEditor) androidx.compose.foundation.layout.PaddingValues(0.dp) else innerPadding)
             ) {
                 composable(SetFlowRoute.Sets.routePattern) {
                     SetsAndLocalTracksScreen(
@@ -179,9 +193,16 @@ fun SetFlowAppShell(
                     arguments = listOf(navArgument(SetFlowRoute.SetDetail.ARG_SET_ID) { type = NavType.StringType })
                 ) { entry ->
                     val setId = entry.arguments?.getString(SetFlowRoute.SetDetail.ARG_SET_ID) ?: "sample-shell-set-01"
-                    SetDetailPlaceholderScreen(
+                    SetDetailScreen(
                         setId = setId,
-                        state = state,
+                        projectDetail = state.activeProjectDetail,
+                        libraryTracks = state.tracks,
+                        analysisStatuses = state.analysisStatuses,
+                        onOpenTransitionEditor = { edgeId ->
+                            if (viewModel.controller.openTransitionEditor(setId, edgeId)) {
+                                navController.navigate(SetFlowRoute.TransitionEditor(setId, edgeId).routePattern)
+                            }
+                        },
                         onAddTrackToSet = { trackId ->
                             val rev = state.activeProjectDetail?.project?.editRevision ?: 1L
                             viewModel.controller.addTrackToSet(setId, rev, trackId)
@@ -207,6 +228,55 @@ fun SetFlowAppShell(
                             navController.popBackStack(SetFlowRoute.Sets.routePattern, inclusive = false)
                         }
                     )
+                }
+                composable(
+                    route = SetFlowRoute.TransitionEditor.PATTERN,
+                    arguments = listOf(
+                        navArgument(SetFlowRoute.TransitionEditor.ARG_SET_ID) { type = NavType.StringType },
+                        navArgument(SetFlowRoute.TransitionEditor.ARG_EDGE_ID) { type = NavType.StringType }
+                    )
+                ) { entry ->
+                    val setId = entry.arguments?.getString(SetFlowRoute.TransitionEditor.ARG_SET_ID).orEmpty()
+                    val edgeId = entry.arguments?.getString(SetFlowRoute.TransitionEditor.ARG_EDGE_ID).orEmpty()
+                    val transitionState = state.activeTransitionState
+
+                    if (transitionState != null) {
+                        TransitionEditorScreen(
+                            state = transitionState,
+                            waveformStateA = state.waveformStateA,
+                            waveformStateB = state.waveformStateB,
+                            onDraftParamsChanged = { params ->
+                                viewModel.controller.updateTransitionDraft(params)
+                            },
+                            onSaveTransition = {
+                                if (viewModel.controller.saveTransitionOverride()) {
+                                    navController.popBackStack()
+                                }
+                            },
+                            onResetToAuto = {
+                                viewModel.controller.resetTransitionToAuto()
+                            },
+                            onTogglePreview = {
+                                viewModel.controller.toggleTransitionPreview()
+                            },
+                            onNavigateBack = {
+                                if (viewModel.controller.requestCloseTransitionEditor()) {
+                                    navController.popBackStack()
+                                }
+                            },
+                            onDismissDirtyDialog = {
+                                viewModel.controller.dismissDirtyConfirmationDialog()
+                            },
+                            onConfirmDiscard = {
+                                viewModel.controller.confirmDiscardTransitionChanges()
+                                navController.popBackStack()
+                            }
+                        )
+                    } else {
+                        LaunchedEffect(setId, edgeId) {
+                            viewModel.controller.openTransitionEditor(setId, edgeId)
+                        }
+                    }
                 }
                 composable(SetFlowRoute.Settings.routePattern) {
                     SettingsPlaceholderScreen(state = state)
@@ -516,171 +586,7 @@ private fun formatDurationUs(durationUs: Long): String {
     return String.format(Locale.US, "%d:%02d.%d", minutes, seconds, tenths)
 }
 
-@Composable
-private fun SetDetailPlaceholderScreen(
-    setId: String,
-    state: SetFlowShellUiState,
-    onAddTrackToSet: (String) -> Unit,
-    onMoveOccurrenceUp: (String) -> Unit,
-    onMoveOccurrenceDown: (String) -> Unit,
-    onRemoveOccurrence: (String) -> Unit,
-    onUndoStructuralChange: () -> Unit,
-    onBackToSets: () -> Unit
-) {
-    val detailPlaceholder = state.activeSetDetail
-    val projectDetail = state.activeProjectDetail
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        Card(
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    text = projectDetail?.project?.name ?: detailPlaceholder?.title ?: "Set Detail ($setId)",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = "Revision: ${projectDetail?.project?.editRevision ?: detailPlaceholder?.revision ?: 1L} • Occurrences: ${projectDetail?.occurrences?.size ?: 0} • Edges: ${projectDetail?.edges?.size ?: 0}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.secondary
-                )
-                Text(
-                    text = detailPlaceholder?.notImplementedBanner
-                        ?: "Transition Editor and Playback are not implemented yet.",
-                    style = MaterialTheme.typography.bodySmall
-                )
-                if (projectDetail?.canUndo == true) {
-                    OutlinedButton(onClick = onUndoStructuralChange) {
-                        Text("Undo Last Reorder / Removal")
-                    }
-                }
-            }
-        }
 
-        // Occurrences & Adjacency-Scoped Transition Edge Placeholders (Stage 04 Task 8)
-        val occurrences = projectDetail?.occurrences.orEmpty()
-        val edgesByPair = projectDetail?.edges.orEmpty().associateBy {
-            it.edge.outgoingOccurrenceId to it.edge.incomingOccurrenceId
-        }
-
-        if (occurrences.isEmpty()) {
-            Card(
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = "No track occurrences in this set yet. Add an imported track below.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-        } else {
-            occurrences.forEachIndexed { index, occWithTrack ->
-                val occ = occWithTrack.occurrence
-                val track = occWithTrack.track
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(
-                            text = "#${occ.positionIndex + 1} • ${track.title} — ${track.artist}",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Text(
-                            text = "Occurrence ID: ${occ.occurrenceId.take(16)}… • Track ID: ${occ.trackId.take(16)}… • State: ${track.availabilityState}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            if (index > 0) {
-                                OutlinedButton(onClick = { onMoveOccurrenceUp(occ.occurrenceId) }) {
-                                    Text("Move Up")
-                                }
-                            }
-                            if (index < occurrences.lastIndex) {
-                                OutlinedButton(onClick = { onMoveOccurrenceDown(occ.occurrenceId) }) {
-                                    Text("Move Down")
-                                }
-                            }
-                            OutlinedButton(onClick = { onRemoveOccurrence(occ.occurrenceId) }) {
-                                Text("Remove")
-                            }
-                        }
-                    }
-                }
-
-                // Render adjacency-scoped transition placeholder between occ[index] and occ[index + 1]
-                if (index < occurrences.lastIndex) {
-                    val nextOcc = occurrences[index + 1].occurrence
-                    val edgeSnap = edgesByPair[occ.occurrenceId to nextOcc.occurrenceId]
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp)
-                    ) {
-                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text(
-                                text = "Transition Edge Placeholder (#${index + 1} → #${index + 2})",
-                                style = MaterialTheme.typography.labelLarge,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                            Text(
-                                text = "Edge ID: ${edgeSnap?.edge?.edgeId?.take(16) ?: "none"}… • Origin: ${edgeSnap?.edge?.origin ?: "AUTO"} • PlanRev: ${edgeSnap?.edge?.planRevision ?: 1L} • Status: ${edgeSnap?.edge?.lastValidationStatus ?: "UNRESOLVED"}",
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                            Text(
-                                text = "Adjacency-scoped to (${occ.occurrenceId.take(10)}… → ${nextOcc.occurrenceId.take(10)}…). Interactive transition editor & audio preview arrive in Stages 07–10.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        // Add imported tracks to set (supports adding the same track multiple times as distinct occurrences)
-        if (state.tracks.isNotEmpty()) {
-            Text(
-                text = "Add Imported Track to Set",
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.Bold
-            )
-            state.tracks.forEach { track ->
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        text = "${track.title} (${formatDurationUs(track.durationUs)})",
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(vertical = 8.dp)
-                    )
-                    OutlinedButton(onClick = { onAddTrackToSet(track.trackId) }) {
-                        Text("Append Occurrence")
-                    }
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(4.dp))
-        OutlinedButton(onClick = onBackToSets) {
-            Text("Back to Sets")
-        }
-    }
-}
 
 @Composable
 private fun SettingsPlaceholderScreen(state: SetFlowShellUiState) {

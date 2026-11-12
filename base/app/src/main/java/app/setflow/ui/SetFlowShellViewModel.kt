@@ -3,6 +3,14 @@ package app.setflow.ui
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewModelScope
+import app.myspoti.automix.TrackAnalysis
+import app.myspoti.automix.segue.SegueCodec
+import app.myspoti.automix.segue.SeguePlan
+import app.myspoti.automix.segue.TransitionOverrideParams
+import app.myspoti.automix.segue.TransitionResolutionResult
+import app.setflow.analysis.AnalysisStatus
+import app.setflow.db.EdgeCompleteSnapshot
 import app.setflow.db.ProjectDetailSnapshot
 import app.setflow.domain.DiagnosticEvent
 import app.setflow.domain.ImportItemOutcome
@@ -17,12 +25,22 @@ import app.setflow.service.LocalOnlyShellServiceGraph
 import app.setflow.service.PlaybackShellState
 import app.setflow.service.SetFlowServiceBoundary
 import app.setflow.service.TrackLibraryRepository
+import app.setflow.ui.transition.TransitionEditorState
+import app.setflow.ui.waveform.WaveformDecimator
+import app.setflow.ui.waveform.WaveformResolution
+import app.setflow.ui.waveform.WaveformTileCache
+import app.setflow.ui.waveform.WaveformTileState
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 
 /**
- * Navigation routes in the standalone local-only shell (Stages 02–04).
+ * Navigation routes in the local-only shell (Stages 02–08).
  */
 sealed interface SetFlowRoute {
     val routePattern: String
@@ -37,6 +55,16 @@ sealed interface SetFlowRoute {
         companion object {
             const val PATTERN = "set_detail/{setId}"
             const val ARG_SET_ID = "setId"
+        }
+    }
+
+    data class TransitionEditor(val setId: String, val edgeId: String) : SetFlowRoute {
+        override val routePattern: String = "transition_editor/$setId/$edgeId"
+
+        companion object {
+            const val PATTERN = "transition_editor/{setId}/{edgeId}"
+            const val ARG_SET_ID = "setId"
+            const val ARG_EDGE_ID = "edgeId"
         }
     }
 
@@ -57,13 +85,17 @@ data class SetFlowShellUiState(
     val pendingRelinkEvaluation: RelinkCandidateEvaluation? = null,
     val activeSetDetail: SetDetailPlaceholderState? = null,
     val activeProjectDetail: ProjectDetailSnapshot? = null,
+    val activeTransitionState: TransitionEditorState? = null,
+    val waveformStateA: WaveformTileState = WaveformTileState.Loading,
+    val waveformStateB: WaveformTileState = WaveformTileState.Loading,
+    val analysisStatuses: Map<String, AnalysisStatus> = emptyMap(),
     val playbackState: PlaybackShellState = PlaybackShellState(),
     val analysisStatus: AnalysisEngineStatus = AnalysisEngineStatus(
         engineRetained = true,
         modelAssetPath = LocalOnlyShellServiceGraph.MODEL_ASSET_RELATIVE_PATH,
         modelAssetPresent = true,
         modelAssetBytes = 5_596_894L,
-        stageNote = "Stage 04 SQLite persistence"
+        stageNote = "Stage 08 Set Builder & Transition Editor UI"
     ),
     val offlineOnlyEnforced: Boolean = true,
     val accountRequired: Boolean = false,
@@ -74,16 +106,27 @@ data class SetFlowShellUiState(
  * Pure Kotlin shell state controller (usable both in JVM unit tests and inside [SetFlowShellViewModel]).
  */
 class SetFlowShellController(
-    private val services: SetFlowServiceBoundary = LocalOnlyShellServiceGraph()
+    val services: SetFlowServiceBoundary = LocalOnlyShellServiceGraph(),
+    private val backgroundDispatcher: CoroutineDispatcher = Dispatchers.Default,
+    parentScope: CoroutineScope? = null
 ) {
+    private val scope = parentScope ?: CoroutineScope(SupervisorJob() + backgroundDispatcher)
+    val waveformCache = WaveformTileCache(diagnostics = services.diagnostics)
+
+    private var activeTransitionDraft: TransitionEditorState? = null
+    private var activeWaveformA: WaveformTileState = WaveformTileState.Loading
+    private var activeWaveformB: WaveformTileState = WaveformTileState.Loading
+
     private val _uiState = MutableStateFlow(buildSnapshot(listOf(SetFlowRoute.Sets)))
     val uiState: StateFlow<SetFlowShellUiState> = _uiState.asStateFlow()
 
     fun openSets() {
+        stopPreviewAndClearTransition()
         updateStack(listOf(SetFlowRoute.Sets))
     }
 
     fun openSetDetail(setId: String) {
+        stopPreviewAndClearTransition()
         val current = _uiState.value.backStack
         val next = current + SetFlowRoute.SetDetail(setId)
         services.diagnostics.record(
@@ -94,6 +137,7 @@ class SetFlowShellController(
     }
 
     fun openSettings() {
+        stopPreviewAndClearTransition()
         val current = _uiState.value.backStack
         val next = if (current.lastOrNull() == SetFlowRoute.Settings) current else current + SetFlowRoute.Settings
         services.diagnostics.record(
@@ -104,12 +148,243 @@ class SetFlowShellController(
     }
 
     /**
+     * Opens focused Transition Editor for an exact adjacent pair (Task 2 & Task 5).
+     */
+    fun openTransitionEditor(setId: String, edgeId: String): Boolean {
+        val edgeSnap = services.projectDatabase.getEdgeCompleteSnapshot(edgeId) ?: return false
+        val sideTracks = services.projectDatabase.getEdgeSideTracks(edgeId) ?: return false
+        val projectDetail = services.setRepository.getProjectDetail(setId) ?: return false
+
+        val (outTrack, inTrack) = sideTracks
+        val draft = services.transitionManager.getDraft(edgeId)
+        val initialParams = services.transitionManager.toOverrideParams(draft)
+        val initialResolution = services.transitionManager.preview(edgeId, initialParams)
+
+        val outStatus = services.analysisEngine.engine?.getStatus(outTrack.trackId) ?: AnalysisStatus.Idle
+        val inStatus = services.analysisEngine.engine?.getStatus(inTrack.trackId) ?: AnalysisStatus.Idle
+
+        val outAnalysis = (outStatus as? AnalysisStatus.Confident)?.analysis
+            ?: (outStatus as? AnalysisStatus.Unreliable)?.analysis
+        val inAnalysis = (inStatus as? AnalysisStatus.Confident)?.analysis
+            ?: (inStatus as? AnalysisStatus.Unreliable)?.analysis
+
+        val committedHash = edgeSnap.resolvedPlan?.planHashSha256.orEmpty()
+
+        activeTransitionDraft = TransitionEditorState(
+            setId = setId,
+            edgeId = edgeId,
+            edgeRevision = edgeSnap.edge.planRevision,
+            projectRevision = projectDetail.project.editRevision,
+            outgoingTrack = outTrack,
+            incomingTrack = inTrack,
+            outgoingAnalysis = outAnalysis,
+            incomingAnalysis = inAnalysis,
+            outgoingAnalysisStatus = outStatus,
+            incomingAnalysisStatus = inStatus,
+            draftParams = initialParams,
+            initialParams = initialParams,
+            validationResult = initialResolution,
+            isPreviewPlaying = false,
+            isSaving = false,
+            edgeOrigin = edgeSnap.edge.origin,
+            committedPlanHash = committedHash,
+            showDirtyConfirmationDialog = false
+        )
+
+        // Waveforms decimation (Task 4: Never random waveforms, actual analyzed energy data)
+        loadWaveformsForTransition(outTrack.trackId, outTrack.contentFingerprint, outAnalysis, inTrack.trackId, inTrack.contentFingerprint, inAnalysis)
+
+        val current = _uiState.value.backStack
+        val next = current + SetFlowRoute.TransitionEditor(setId, edgeId)
+        services.diagnostics.record(
+            category = "Navigation",
+            message = "Opened TransitionEditor for edgeId=$edgeId"
+        )
+        updateStack(next)
+        return true
+    }
+
+    /**
+     * Updates draft parameters in-memory without mutating the database (Task 5, Contract D12).
+     */
+    fun updateTransitionDraft(params: TransitionOverrideParams) {
+        val current = activeTransitionDraft ?: return
+        val resolution = services.transitionManager.preview(current.edgeId, params)
+        activeTransitionDraft = current.copy(
+            draftParams = params,
+            validationResult = resolution
+        )
+        refreshSnapshot()
+    }
+
+    /**
+     * Toggles preview playback of the current draft (Task 5: Clearly marked PREVIEW UNSAVED).
+     */
+    fun toggleTransitionPreview() {
+        val current = activeTransitionDraft ?: return
+        val nextPlaying = !current.isPreviewPlaying
+        activeTransitionDraft = current.copy(isPreviewPlaying = nextPlaying)
+        services.diagnostics.record(
+            category = "Preview",
+            message = "Draft preview ${if (nextPlaying) "started" else "stopped"} for edgeId=${current.edgeId} (PREVIEW UNSAVED)"
+        )
+        refreshSnapshot()
+    }
+
+    /**
+     * Resets transition override to automated recommendation (Task 5).
+     */
+    fun resetTransitionToAuto(): EdgeCompleteSnapshot? {
+        val current = activeTransitionDraft ?: return null
+        val updatedSnap = services.transitionManager.resetToAuto(
+            edgeId = current.edgeId,
+            expectedEdgePlanRevision = current.edgeRevision,
+            expectedProjectRevision = current.projectRevision
+        )
+        // Refresh draft from newly reset database state
+        val draft = services.transitionManager.getDraft(current.edgeId)
+        val resetParams = services.transitionManager.toOverrideParams(draft)
+        val resetResolution = services.transitionManager.preview(current.edgeId, resetParams)
+
+        activeTransitionDraft = current.copy(
+            edgeRevision = updatedSnap.edge.planRevision,
+            projectRevision = services.setRepository.getProjectDetail(current.setId)?.project?.editRevision ?: current.projectRevision,
+            edgeOrigin = updatedSnap.edge.origin,
+            draftParams = resetParams,
+            initialParams = resetParams,
+            validationResult = resetResolution,
+            committedPlanHash = updatedSnap.resolvedPlan?.planHashSha256.orEmpty()
+        )
+        services.setRepository.refreshSets()
+        refreshSnapshot()
+        return updatedSnap
+    }
+
+    /**
+     * Atomically validates and commits the transition override to SQLite (Task 5).
+     */
+    fun saveTransitionOverride(): Boolean {
+        val current = activeTransitionDraft ?: return false
+        if (!current.isValid) return false
+
+        activeTransitionDraft = current.copy(isSaving = true)
+        refreshSnapshot()
+
+        try {
+            services.transitionManager.saveOverride(
+                edgeId = current.edgeId,
+                params = current.draftParams,
+                expectedEdgePlanRevision = current.edgeRevision,
+                expectedProjectRevision = current.projectRevision
+            )
+            services.setRepository.refreshSets()
+            services.diagnostics.record(
+                category = "TransitionManager",
+                message = "Committed transition override for edgeId=${current.edgeId} (hash=${current.currentPlanHash})"
+            )
+            stopPreviewAndClearTransition()
+            navigateBack()
+            return true
+        } catch (e: Exception) {
+            services.diagnostics.record(
+                category = "TransitionManager",
+                message = "Save failed for edgeId=${current.edgeId}: ${e.message}"
+            )
+            activeTransitionDraft = current.copy(isSaving = false)
+            refreshSnapshot()
+            return false
+        }
+    }
+
+    /**
+     * Handles back navigation from Transition Editor with dirty check (Task 5).
+     */
+    fun requestCloseTransitionEditor(): Boolean {
+        val current = activeTransitionDraft
+        if (current != null && current.isDirty) {
+            // Display dirty confirmation dialog (Task 5)
+            activeTransitionDraft = current.copy(showDirtyConfirmationDialog = true)
+            refreshSnapshot()
+            return false
+        }
+        stopPreviewAndClearTransition()
+        return navigateBack()
+    }
+
+    fun dismissDirtyConfirmationDialog() {
+        val current = activeTransitionDraft ?: return
+        activeTransitionDraft = current.copy(showDirtyConfirmationDialog = false)
+        refreshSnapshot()
+    }
+
+    fun confirmDiscardTransitionChanges() {
+        services.diagnostics.record(
+            category = "TransitionEditor",
+            message = "Discarded unsaved draft changes for edgeId=${activeTransitionDraft?.edgeId}"
+        )
+        stopPreviewAndClearTransition()
+        navigateBack()
+    }
+
+    private fun stopPreviewAndClearTransition() {
+        activeTransitionDraft?.let {
+            if (it.isPreviewPlaying) {
+                services.diagnostics.record(
+                    category = "Preview",
+                    message = "Stopped preview on editor close"
+                )
+            }
+        }
+        activeTransitionDraft = null
+        activeWaveformA = WaveformTileState.Loading
+        activeWaveformB = WaveformTileState.Loading
+    }
+
+    private fun loadWaveformsForTransition(
+        trackIdA: String,
+        fingerprintA: String,
+        analysisA: TrackAnalysis?,
+        trackIdB: String,
+        fingerprintB: String,
+        analysisB: TrackAnalysis?
+    ) {
+        if (analysisA != null) {
+            val tile = WaveformDecimator.decimateFromAnalysis(
+                trackId = trackIdA,
+                analysis = analysisA,
+                startUs = 0L,
+                endUs = (analysisA.duration * 1_000_000.0).toLong(),
+                resolution = WaveformResolution.MEDIUM
+            )
+            activeWaveformA = WaveformTileState.Ready(tile)
+            waveformCache.putTile(trackIdA, fingerprintA, tile, WaveformResolution.MEDIUM)
+        } else {
+            activeWaveformA = WaveformTileState.Loading
+        }
+
+        if (analysisB != null) {
+            val tile = WaveformDecimator.decimateFromAnalysis(
+                trackId = trackIdB,
+                analysis = analysisB,
+                startUs = 0L,
+                endUs = (analysisB.duration * 1_000_000.0).toLong(),
+                resolution = WaveformResolution.MEDIUM
+            )
+            activeWaveformB = WaveformTileState.Ready(tile)
+            waveformCache.putTile(trackIdB, fingerprintB, tile, WaveformResolution.MEDIUM)
+        } else {
+            activeWaveformB = WaveformTileState.Loading
+        }
+    }
+
+    /**
      * Pops back stack if deeper than root; returns true if handled, false if at root.
      */
     fun navigateBack(): Boolean {
         val current = _uiState.value.backStack
         if (current.size <= 1) return false
-        updateStack(current.dropLast(1))
+        val next = current.dropLast(1)
+        updateStack(next)
         return true
     }
 
@@ -119,7 +394,7 @@ class SetFlowShellController(
     }
 
     // -------------------------------------------------------------------------
-    // Stage 04 Persisted Set & Occurrence Actions
+    // Set & Occurrence Actions (Stage 04 & Stage 08)
     // -------------------------------------------------------------------------
 
     fun createNewSet(name: String): ProjectDetailSnapshot {
@@ -165,6 +440,16 @@ class SetFlowShellController(
         return updated
     }
 
+    fun reorderSetOccurrences(
+        setId: String,
+        expectedRevision: Long,
+        orderedOccurrenceIds: List<String>
+    ): ProjectDetailSnapshot {
+        val updated = services.setRepository.reorderSetOccurrences(setId, expectedRevision, orderedOccurrenceIds)
+        refreshSnapshot()
+        return updated
+    }
+
     fun removeOccurrenceFromSet(
         setId: String,
         expectedRevision: Long,
@@ -182,7 +467,7 @@ class SetFlowShellController(
     }
 
     // -------------------------------------------------------------------------
-    // Stage 03 Local Track Import & Relink Actions
+    // Local Track Import & Relink Actions (Stage 03)
     // -------------------------------------------------------------------------
 
     fun importLocalUris(
@@ -252,12 +537,16 @@ class SetFlowShellController(
 
     private fun buildSnapshot(stack: List<SetFlowRoute>): SetFlowShellUiState {
         val top = stack.lastOrNull() ?: SetFlowRoute.Sets
-        val detailPlaceholder = (top as? SetFlowRoute.SetDetail)?.let {
-            services.setRepository.getSetDetailPlaceholder(it.setId)
+        val currentSetId = when (top) {
+            is SetFlowRoute.SetDetail -> top.setId
+            is SetFlowRoute.TransitionEditor -> top.setId
+            else -> null
         }
-        val projectDetail = (top as? SetFlowRoute.SetDetail)?.let {
-            services.setRepository.getProjectDetail(it.setId)
-        }
+        val detailPlaceholder = currentSetId?.let { services.setRepository.getSetDetailPlaceholder(it) }
+        val projectDetail = currentSetId?.let { services.setRepository.getProjectDetail(it) }
+
+        val analysisStatuses = services.analysisEngine.engine?.states?.value ?: emptyMap()
+
         return SetFlowShellUiState(
             currentRoute = top,
             backStack = stack,
@@ -267,6 +556,10 @@ class SetFlowShellController(
             pendingRelinkEvaluation = services.trackLibrary.pendingRelinkEvaluation.value,
             activeSetDetail = detailPlaceholder,
             activeProjectDetail = projectDetail,
+            activeTransitionState = activeTransitionDraft,
+            waveformStateA = activeWaveformA,
+            waveformStateB = activeWaveformB,
+            analysisStatuses = analysisStatuses,
             playbackState = services.playbackController.state.value,
             analysisStatus = services.analysisEngine.status.value,
             offlineOnlyEnforced = services.offlineOnlyEnforced,
