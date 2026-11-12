@@ -46,6 +46,10 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import app.setflow.BuildConfig
+import app.setflow.domain.LocalTrackRecord
+import app.setflow.domain.RelinkCandidateEvaluation
+import app.setflow.domain.TrackAvailabilityState
+import java.util.Locale
 
 private val SetFlowDarkColors = darkColorScheme(
     primary = Color(0xFFFFA726),
@@ -62,7 +66,11 @@ private val SetFlowDarkColors = darkColorScheme(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SetFlowAppShell(viewModel: SetFlowShellViewModel) {
+fun SetFlowAppShell(
+    viewModel: SetFlowShellViewModel,
+    onLaunchSafMultiPicker: () -> Unit = {},
+    onLaunchSafRelinkPicker: (String) -> Unit = {}
+) {
     val state by viewModel.uiState.collectAsState()
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
@@ -86,7 +94,7 @@ fun SetFlowAppShell(viewModel: SetFlowShellViewModel) {
                             text = when {
                                 currentDestination.startsWith("set_detail/") -> "SetFlow • Set Detail (Placeholder)"
                                 currentDestination == SetFlowRoute.Settings.routePattern -> "SetFlow • Settings (Placeholder)"
-                                else -> "SetFlow • Sets (Placeholder)"
+                                else -> "SetFlow • Sets & Local Audio"
                             }
                         )
                     },
@@ -145,8 +153,14 @@ fun SetFlowAppShell(viewModel: SetFlowShellViewModel) {
                     .padding(innerPadding)
             ) {
                 composable(SetFlowRoute.Sets.routePattern) {
-                    SetsPlaceholderScreen(
+                    SetsAndLocalTracksScreen(
                         state = state,
+                        onLaunchSafMultiPicker = onLaunchSafMultiPicker,
+                        onLaunchSafRelinkPicker = onLaunchSafRelinkPicker,
+                        onCancelImport = { viewModel.controller.cancelActiveImport() },
+                        onVerifyAllTracks = { viewModel.controller.verifyAllTracks() },
+                        onConfirmRelink = { viewModel.controller.confirmPendingRelink(userConfirmedUncertainMatch = true) },
+                        onDismissRelink = { viewModel.controller.dismissPendingRelink() },
                         onOpenSetDetail = { setId ->
                             viewModel.controller.openSetDetail(setId)
                             navController.navigate(SetFlowRoute.SetDetail(setId).routePattern)
@@ -180,8 +194,14 @@ fun SetFlowAppShell(viewModel: SetFlowShellViewModel) {
 }
 
 @Composable
-private fun SetsPlaceholderScreen(
+private fun SetsAndLocalTracksScreen(
     state: SetFlowShellUiState,
+    onLaunchSafMultiPicker: () -> Unit,
+    onLaunchSafRelinkPicker: (String) -> Unit,
+    onCancelImport: () -> Unit,
+    onVerifyAllTracks: () -> Unit,
+    onConfirmRelink: () -> Unit,
+    onDismissRelink: () -> Unit,
     onOpenSetDetail: (String) -> Unit,
     onOpenSettings: () -> Unit
 ) {
@@ -196,24 +216,111 @@ private fun SetsPlaceholderScreen(
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
             modifier = Modifier.fillMaxWidth()
         ) {
-            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    text = "Stage 02 — Standalone Local-Only Shell",
+                    text = "Stage 03 — Local Audio Import, Identity & Relink",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold
                 )
                 Text(
-                    text = "Offline-first • Zero network permissions • No Spotify login, WebView, or extensions.",
+                    text = "Offline-first • Zero network permissions • Non-destructive SAF read access.",
                     style = MaterialTheme.typography.bodyMedium
                 )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = onLaunchSafMultiPicker) {
+                        Text("Import Audio Files (SAF)")
+                    }
+                    OutlinedButton(onClick = onVerifyAllTracks) {
+                        Text("Verify Grants")
+                    }
+                }
                 Text(
-                    text = "Status: Set creation, SAF local audio import, and Room persistence are NOT IMPLEMENTED yet (Stages 03–04). Audio playback is inactive.",
+                    text = "Note: Two-deck audio playback, waveform preview, and Room set persistence are NOT IMPLEMENTED in Stage 03 (Stages 04–10). Audio is inactive.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.primary
                 )
             }
         }
 
+        // Import progress & recent batch outcomes
+        val progress = state.importProgress
+        if (progress.isImporting || progress.outcomes.isNotEmpty()) {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        text = if (progress.isImporting) {
+                            "Importing (${progress.completedCount}/${progress.totalCount}): ${progress.currentDisplayName}"
+                        } else if (progress.cancelled) {
+                            "Last Import Batch Cancelled (${progress.completedCount}/${progress.totalCount})"
+                        } else {
+                            "Last Import Batch Complete (${progress.completedCount}/${progress.totalCount})"
+                        },
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    if (progress.isImporting) {
+                        OutlinedButton(onClick = onCancelImport) {
+                            Text("Cancel Import")
+                        }
+                    }
+                    progress.outcomes.takeLast(5).forEach { outcome ->
+                        Text(
+                            text = "• ${outcome.displayName}: ${outcome.outcomeType} — ${outcome.message}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (outcome.errorCode != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        }
+
+        // Pending Relink Confirmation Banner
+        val relinkEval = state.pendingRelinkEvaluation
+        if (relinkEval != null) {
+            RelinkEvaluationCard(
+                evaluation = relinkEval,
+                onConfirmRelink = onConfirmRelink,
+                onDismissRelink = onDismissRelink
+            )
+        }
+
+        // Imported Local Tracks Section
+        Text(
+            text = "Local Track Library (${state.tracks.size})",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold
+        )
+        if (state.tracks.isEmpty()) {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "No local tracks imported yet. Tap 'Import Audio Files (SAF)' to select DRM-free WAV, FLAC, MP3, M4A, or OGG files.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        } else {
+            state.tracks.forEach { track ->
+                LocalTrackRowCard(
+                    track = track,
+                    onRelinkClick = { onLaunchSafRelinkPicker(track.trackId) }
+                )
+            }
+        }
+
+        // Sets list placeholder section
+        Text(
+            text = "DJ Sets (Stage 04 Room Persistence Placeholder)",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold
+        )
         state.sets.forEach { setItem ->
             Card(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -250,6 +357,122 @@ private fun SetsPlaceholderScreen(
 }
 
 @Composable
+private fun RelinkEvaluationCard(
+    evaluation: RelinkCandidateEvaluation,
+    onConfirmRelink: () -> Unit,
+    onDismissRelink: () -> Unit
+) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            when (evaluation) {
+                is RelinkCandidateEvaluation.UncertainMatchRequiresConfirmation -> {
+                    Text(
+                        text = "Relink Confirmation Required",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        text = evaluation.reason,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = onConfirmRelink) {
+                            Text("Confirm Relink")
+                        }
+                        OutlinedButton(onClick = onDismissRelink) {
+                            Text("Cancel")
+                        }
+                    }
+                }
+                is RelinkCandidateEvaluation.RejectedCandidate -> {
+                    Text(
+                        text = "Relink Rejected (${evaluation.errorCode.code})",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        text = evaluation.reason,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    OutlinedButton(onClick = onDismissRelink) {
+                        Text("Dismiss")
+                    }
+                }
+                is RelinkCandidateEvaluation.ExactMatch -> {
+                    Text(
+                        text = "Exact Fingerprint Match: ${evaluation.candidateDisplayName}",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Button(onClick = onConfirmRelink) {
+                        Text("Apply Relink")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LocalTrackRowCard(
+    track: LocalTrackRecord,
+    onRelinkClick: () -> Unit
+) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                text = "${track.title} — ${track.artist}",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                text = "${track.displayName} • ${formatDurationUs(track.durationUs)} • ${track.codecDescription} • ${track.sampleRateHz} Hz",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = "State: ${track.availabilityState} • Grant: ${track.identity.grantStatus} • FP: ${track.identity.contentFingerprint.take(28)}…",
+                style = MaterialTheme.typography.bodySmall,
+                color = if (track.availabilityState == TrackAvailabilityState.AVAILABLE) {
+                    MaterialTheme.colorScheme.secondary
+                } else {
+                    MaterialTheme.colorScheme.primary
+                }
+            )
+            if (track.statusDetail.isNotEmpty()) {
+                Text(
+                    text = track.statusDetail,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            if (track.availabilityState != TrackAvailabilityState.AVAILABLE) {
+                OutlinedButton(onClick = onRelinkClick) {
+                    Text("Track missing/changed — Choose Replacement to Relink")
+                }
+            }
+        }
+    }
+}
+
+private fun formatDurationUs(durationUs: Long): String {
+    if (durationUs <= 0L) return "0:00.0"
+    val totalTenths = durationUs / 100_000L
+    val minutes = totalTenths / 600L
+    val seconds = (totalTenths % 600L) / 10L
+    val tenths = totalTenths % 10L
+    return String.format(Locale.US, "%d:%02d.%d", minutes, seconds, tenths)
+}
+
+@Composable
 private fun SetDetailPlaceholderScreen(
     setId: String,
     state: SetFlowShellUiState,
@@ -274,13 +497,13 @@ private fun SetDetailPlaceholderScreen(
                     fontWeight = FontWeight.Bold
                 )
                 Text(
-                    text = "NOT IMPLEMENTED IN STAGE 02",
+                    text = "NOT IMPLEMENTED IN STAGE 03",
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.primary
                 )
                 Text(
                     text = detail?.notImplementedBanner
-                        ?: "Set Detail, Track Import, Transition Editor, and Playback are not implemented yet.",
+                        ?: "Set Detail, Transition Editor, and Playback are not implemented yet.",
                     style = MaterialTheme.typography.bodyMedium
                 )
                 Spacer(modifier = Modifier.height(4.dp))
@@ -290,7 +513,7 @@ private fun SetDetailPlaceholderScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Text(
-                    text = "No fake play/waveform/transition controls are shown until their audio and persistence gates pass in Stages 03–10.",
+                    text = "No fake play/waveform/transition controls are shown until their audio and persistence gates pass in Stages 04–10.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -360,7 +583,7 @@ private fun SettingsPlaceholderScreen(state: SetFlowShellUiState) {
                     color = MaterialTheme.colorScheme.primary
                 )
                 Text(
-                    text = "Audio output sample-rate policy, transition defaults, and user-initiated diagnostic file export are not implemented in Stage 02.",
+                    text = "Audio output sample-rate policy, transition defaults, and user-initiated diagnostic file export are not implemented in Stage 03.",
                     style = MaterialTheme.typography.bodySmall
                 )
             }

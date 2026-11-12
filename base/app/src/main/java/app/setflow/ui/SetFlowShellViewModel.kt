@@ -4,18 +4,24 @@ package app.setflow.ui
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import app.setflow.domain.DiagnosticEvent
+import app.setflow.domain.ImportItemOutcome
+import app.setflow.domain.ImportProgressState
+import app.setflow.domain.LocalTrackRecord
+import app.setflow.domain.RelinkCandidateEvaluation
 import app.setflow.domain.SetDetailPlaceholderState
 import app.setflow.domain.SetSummary
+import app.setflow.domain.TrackImportSource
 import app.setflow.service.AnalysisEngineStatus
 import app.setflow.service.LocalOnlyShellServiceGraph
 import app.setflow.service.PlaybackShellState
 import app.setflow.service.SetFlowServiceBoundary
+import app.setflow.service.TrackLibraryRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 /**
- * Navigation routes in the Stage 02 standalone local-only shell.
+ * Navigation routes in the standalone local-only shell (Stages 02–03).
  */
 sealed interface SetFlowRoute {
     val routePattern: String
@@ -45,6 +51,9 @@ data class SetFlowShellUiState(
     val currentRoute: SetFlowRoute = SetFlowRoute.Sets,
     val backStack: List<SetFlowRoute> = listOf(SetFlowRoute.Sets),
     val sets: List<SetSummary> = emptyList(),
+    val tracks: List<LocalTrackRecord> = emptyList(),
+    val importProgress: ImportProgressState = ImportProgressState(),
+    val pendingRelinkEvaluation: RelinkCandidateEvaluation? = null,
     val activeSetDetail: SetDetailPlaceholderState? = null,
     val playbackState: PlaybackShellState = PlaybackShellState(),
     val analysisStatus: AnalysisEngineStatus = AnalysisEngineStatus(
@@ -52,7 +61,7 @@ data class SetFlowShellUiState(
         modelAssetPath = LocalOnlyShellServiceGraph.MODEL_ASSET_RELATIVE_PATH,
         modelAssetPresent = true,
         modelAssetBytes = 5_596_894L,
-        stageNote = "Stage 02 shell"
+        stageNote = "Stage 03 local import"
     ),
     val offlineOnlyEnforced: Boolean = true,
     val accountRequired: Boolean = false,
@@ -65,7 +74,7 @@ data class SetFlowShellUiState(
 class SetFlowShellController(
     private val services: SetFlowServiceBoundary = LocalOnlyShellServiceGraph()
 ) {
-    private val _uiState = MutableStateFlow(buildSnapshot( listOf(SetFlowRoute.Sets)))
+    private val _uiState = MutableStateFlow(buildSnapshot(listOf(SetFlowRoute.Sets)))
     val uiState: StateFlow<SetFlowShellUiState> = _uiState.asStateFlow()
 
     fun openSets() {
@@ -104,6 +113,63 @@ class SetFlowShellController(
 
     fun requestStopPlayback() {
         services.playbackController.stopAll()
+        refreshSnapshot()
+    }
+
+    fun importLocalUris(
+        uriStrings: List<String>,
+        intentFlags: Int = TrackLibraryRepository.DEFAULT_SAF_GRANT_FLAGS,
+        importSource: TrackImportSource = TrackImportSource.SAF_DOCUMENT_PICKER
+    ): List<ImportItemOutcome> {
+        val outcomes = services.trackLibrary.importUris(
+            uriStrings = uriStrings,
+            intentFlags = intentFlags,
+            importSource = importSource
+        )
+        refreshSnapshot()
+        return outcomes
+    }
+
+    fun cancelActiveImport() {
+        services.trackLibrary.cancelActiveImport()
+        refreshSnapshot()
+    }
+
+    fun verifyAllTracks(): List<LocalTrackRecord> {
+        val verified = services.trackLibrary.verifyAllTracks()
+        refreshSnapshot()
+        return verified
+    }
+
+    fun evaluateRelink(
+        trackId: String,
+        candidateUri: String,
+        intentFlags: Int = TrackLibraryRepository.DEFAULT_SAF_GRANT_FLAGS,
+        autoApplyOnExactMatch: Boolean = true
+    ): RelinkCandidateEvaluation {
+        val eval = services.trackLibrary.evaluateRelinkCandidate(
+            trackId = trackId,
+            candidateUri = candidateUri,
+            intentFlags = intentFlags,
+            autoApplyOnExactMatch = autoApplyOnExactMatch
+        )
+        refreshSnapshot()
+        return eval
+    }
+
+    fun confirmPendingRelink(userConfirmedUncertainMatch: Boolean): LocalTrackRecord? {
+        val pending = services.trackLibrary.pendingRelinkEvaluation.value ?: return null
+        val updated = services.trackLibrary.confirmRelink(pending, userConfirmedUncertainMatch)
+        refreshSnapshot()
+        return updated
+    }
+
+    fun dismissPendingRelink() {
+        services.trackLibrary.clearPendingRelinkEvaluation()
+        refreshSnapshot()
+    }
+
+    fun refreshSnapshot() {
         updateStack(_uiState.value.backStack)
     }
 
@@ -120,6 +186,9 @@ class SetFlowShellController(
             currentRoute = top,
             backStack = stack,
             sets = services.setRepository.sets.value,
+            tracks = services.trackLibrary.tracks.value,
+            importProgress = services.trackLibrary.importProgress.value,
+            pendingRelinkEvaluation = services.trackLibrary.pendingRelinkEvaluation.value,
             activeSetDetail = detail,
             playbackState = services.playbackController.state.value,
             analysisStatus = services.analysisEngine.status.value,

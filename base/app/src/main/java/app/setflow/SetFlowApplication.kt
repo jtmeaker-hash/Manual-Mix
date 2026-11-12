@@ -2,6 +2,7 @@
 package app.setflow
 
 import android.app.Application
+import app.setflow.io.AndroidSafTrackSourceProvider
 import app.setflow.service.LocalOnlyShellServiceGraph
 import app.setflow.service.SetFlowServiceBoundary
 
@@ -19,7 +20,9 @@ class SetFlowApplication : Application() {
         val (present, sizeBytes) = inspectBundledBeatModel()
         services = LocalOnlyShellServiceGraph(
             modelAssetPresent = present,
-            modelAssetBytes = sizeBytes
+            modelAssetBytes = sizeBytes,
+            sourceProvider = AndroidSafTrackSourceProvider(this),
+            storageDirectory = filesDir
         )
     }
 

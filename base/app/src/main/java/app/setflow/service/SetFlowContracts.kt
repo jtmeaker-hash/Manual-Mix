@@ -7,9 +7,12 @@ import app.setflow.domain.DiagnosticsRingBuffer
 import app.setflow.domain.SchedulerPhase
 import app.setflow.domain.SetDetailPlaceholderState
 import app.setflow.domain.SetSummary
+import app.setflow.io.TrackSourceProvider
+import app.setflow.io.VirtualSafTrackSourceProvider
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.io.File
 
 /**
  * Result of resolving a local track identity against persisted SAF/local URI grants.
@@ -59,7 +62,7 @@ interface AnalysisEngineContract {
 
 /**
  * Explicit local-only playback shell state owned outside Activity.
- * Stage 02 does not play audio and never pretends to play audio.
+ * Stage 03 does not play audio and never pretends to play audio.
  */
 data class PlaybackShellState(
     val phase: SchedulerPhase = SchedulerPhase.IDLE,
@@ -83,6 +86,7 @@ interface PlaybackSessionController {
  */
 interface SetFlowServiceBoundary {
     val setRepository: SetRepository
+    val trackLibrary: TrackLibraryRepository
     val trackResolver: TrackResolver
     val analysisEngine: AnalysisEngineContract
     val playbackController: PlaybackSessionController
@@ -92,26 +96,37 @@ interface SetFlowServiceBoundary {
 }
 
 /**
- * Default Stage 02 local-only service boundary implementation.
+ * Default local-only service boundary implementation (Stage 02 shell + Stage 03 local audio import/relink).
  */
 class LocalOnlyShellServiceGraph(
     modelAssetPresent: Boolean = true,
-    modelAssetBytes: Long = 5_596_894L
+    modelAssetBytes: Long = 5_596_894L,
+    sourceProvider: TrackSourceProvider = VirtualSafTrackSourceProvider(),
+    storageDirectory: File? = null
 ) : SetFlowServiceBoundary {
 
     override val diagnostics = DiagnosticsRingBuffer(capacity = 128)
     override val offlineOnlyEnforced: Boolean = true
     override val accountRequired: Boolean = false
 
+    override val trackLibrary: TrackLibraryRepository = LocalTrackLibraryService(
+        sourceProvider = sourceProvider,
+        diagnostics = diagnostics,
+        storageDirectory = storageDirectory
+    )
+
+    override val trackResolver: TrackResolver
+        get() = trackLibrary
+
     override val setRepository: SetRepository = object : SetRepository {
         private val sampleSets = MutableStateFlow(
             listOf(
                 SetSummary(
                     setId = "sample-shell-set-01",
-                    title = "Stage 02 Shell Preview Set (Not Implemented)",
+                    title = "Stage 03 Preview Set (Room Persistence in Stage 04)",
                     trackCount = 0,
                     revision = 1L,
-                    statusNote = "Placeholder only — SAF audio import & Room storage arrive in Stages 03–04"
+                    statusNote = "SAF local audio import & relinking active in Stage 03; Room project DB arrives in Stage 04"
                 )
             )
         )
@@ -123,23 +138,8 @@ class LocalOnlyShellServiceGraph(
                 setId = setId,
                 title = found?.title ?: "Set ($setId)",
                 revision = found?.revision ?: 1L,
-                notImplementedBanner = "Not implemented in Stage 02: Local SAF track import (Stage 03), Room database (Stage 04), Two-deck Media3 playback (Stage 05), Beat grid analysis cache (Stage 06), Saved transitions (Stage 07), Set Builder UI (Stage 08), DSP Preview (Stage 09), and Offline WAV Export (Stage 11). Audio playback is inactive.",
+                notImplementedBanner = "Not implemented in Stage 03: Room database (Stage 04), Two-deck Media3 playback (Stage 05), Beat grid analysis cache (Stage 06), Saved transitions (Stage 07), Set Builder UI (Stage 08), DSP Preview (Stage 09), and Offline WAV Export (Stage 11). Audio playback is inactive.",
                 isAudioPlaying = false
-            )
-        }
-    }
-
-    override val trackResolver: TrackResolver = object : TrackResolver {
-        override fun resolve(trackId: String): TrackResolutionResult {
-            diagnostics.record(
-                category = "TrackResolver",
-                phase = SchedulerPhase.IDLE,
-                errorCode = AudioErrorCode.A01_SOURCE_MISSING,
-                message = "Stage 02 shell: SAF TrackResolver not implemented yet for trackId=$trackId"
-            )
-            return TrackResolutionResult.RelinkRequired(
-                trackId = trackId,
-                errorCode = AudioErrorCode.A01_SOURCE_MISSING
             )
         }
     }
@@ -151,7 +151,7 @@ class LocalOnlyShellServiceGraph(
                 modelAssetPath = MODEL_ASSET_RELATIVE_PATH,
                 modelAssetPresent = modelAssetPresent,
                 modelAssetBytes = modelAssetBytes,
-                stageNote = "Pure Kotlin :automix + Beat This! int8 ONNX retained; background analysis worker scheduled for Stage 06."
+                stageNote = "Pure Kotlin :automix + Beat This! int8 ONNX retained; 10s decode + audioKey verification active in Stage 03."
             )
         )
         override val status: StateFlow<AnalysisEngineStatus> = _status.asStateFlow()
@@ -169,7 +169,7 @@ class LocalOnlyShellServiceGraph(
                 isAudioPlaying = false,
                 generation = nextGen,
                 lastError = null,
-                statusMessage = "Stopped (generation=$nextGen). Two-deck Media3 playback is not implemented in Stage 02."
+                statusMessage = "Stopped (generation=$nextGen). Two-deck Media3 playback is not implemented in Stage 03."
             )
             diagnostics.record(
                 category = "PlaybackController",
@@ -183,7 +183,7 @@ class LocalOnlyShellServiceGraph(
         diagnostics.record(
             category = "Startup",
             phase = SchedulerPhase.IDLE,
-            message = "SetFlow Stage 02 cold start: offlineOnly=true, accountRequired=false, modelAssetPresent=$modelAssetPresent"
+            message = "SetFlow cold start: offlineOnly=true, accountRequired=false, modelAssetPresent=$modelAssetPresent"
         )
     }
 

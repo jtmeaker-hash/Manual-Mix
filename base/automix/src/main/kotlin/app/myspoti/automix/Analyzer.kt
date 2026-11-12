@@ -191,7 +191,7 @@ object Analyzer {
     }
 
     /** SHA-256 of the signal the analysis read. */
-    private fun signalKey(mid: FloatArray, side: FloatArray?): String {
+    fun signalKey(mid: FloatArray, side: FloatArray?): String {
         val digest = java.security.MessageDigest.getInstance("SHA-256")
         val bytes = java.nio.ByteBuffer.allocate(64 * 1024).order(java.nio.ByteOrder.LITTLE_ENDIAN)
         for (signal in listOfNotNull(mid, side)) {
