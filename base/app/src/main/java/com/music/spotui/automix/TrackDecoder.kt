@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 package com.music.spotui.automix
 
+import android.content.Context
 import android.media.AudioFormat
 import android.media.MediaCodec
 import android.media.MediaDataSource
@@ -9,17 +10,17 @@ import android.media.MediaFormat
 import android.net.Uri
 import androidx.media3.common.C
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
-import com.music.spotui.data.offline.OfflineCrypto
-import com.music.spotui.di.Graph
+import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.FileDataSource
 import java.io.IOException
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 /**
- * Decodes a whole song to the analysis signals: mid ((L+R)/2) and side ((L-R)/2) at 22.05 kHz.
- * The bytes come through the player's own data source (downloads are decrypted there, extension
- * streams resolved, DASH answers read as one file), so a song is read the way it plays.
+ * Decodes a whole local song to the analysis signals: mid ((L+R)/2) and side ((L-R)/2) at 22.05 kHz.
+ * Reads local content:// or file:// URIs through an injected Media3 [DataSource.Factory].
  */
 @androidx.annotation.OptIn(UnstableApi::class)
 object TrackDecoder {
@@ -28,14 +29,21 @@ object TrackDecoder {
     const val MAX_SECONDS = 15 * 60
 
     class Pcm(val mid: FloatArray, val side: FloatArray) {
-        /** Of the decode, the time spent waiting for the bytes (network, decryption), ms; and their size. */
+        /** Of the decode, the time spent waiting for the bytes, ms; and their size. */
         var readMs = 0L; var bytes = 0L
         /** Of the decode, the time spent turning the codec's output into these signals, ms; reads elsewhere. */
         var convertMs = 0L; var restarts = 0
     }
 
-    fun decode(uri: Uri, cancelled: () -> Boolean): Pcm {
-        val source = ByteSource(uri, cancelled)
+    fun decode(context: Context, uri: Uri, cancelled: () -> Boolean): Pcm =
+        decode(uri, DefaultDataSource.Factory(context.applicationContext), cancelled)
+
+    fun decode(
+        uri: Uri,
+        dataSourceFactory: DataSource.Factory = FileDataSource.Factory(),
+        cancelled: () -> Boolean
+    ): Pcm {
+        val source = ByteSource(uri, dataSourceFactory, cancelled)
         val extractor = MediaExtractor()
         try {
             extractor.setDataSource(source)
@@ -175,10 +183,12 @@ object TrackDecoder {
      * network and the decoder added up (on the phone, 24 MB of a Tidal FLAC: 8.2 s waiting for bytes
      * plus 7.8 s decoding). A read elsewhere (a seek) starts again from there.
      */
-    private class ByteSource(private val uri: Uri, private val cancelled: () -> Boolean) : MediaDataSource() {
-        // Through the media cache for an extension's song: the bytes read for the analysis are the
-        // ones the song then plays from, not asked a second time (see ExtStreamCache).
-        private val data = com.music.spotui.data.offline.ExtStreamCache.Factory(Graph.app).createDataSource()
+    private class ByteSource(
+        private val uri: Uri,
+        dataSourceFactory: DataSource.Factory,
+        private val cancelled: () -> Boolean
+    ) : MediaDataSource() {
+        private val data = dataSourceFactory.createDataSource()
         private var size = -1L
         private var sizeKnown = false
         /** [data] is open at 0 from [getSize], not read yet: the first read from 0 goes on from it. */

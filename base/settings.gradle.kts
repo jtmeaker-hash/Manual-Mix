@@ -19,18 +19,9 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
-        maven("https://jitpack.io") {
-            content { includeGroupByRegex("com\\.github\\..*") }
-        }
     }
 }
 
-rootProject.name = "Myspoti"
+rootProject.name = "SetFlow"
 include(":app")
-include(":api")
 include(":automix")
-include(":extensions")
-include(":extensions-cli")
-include(":api-spotify")
-include(":host-cdp")
-include(":host-android")

@@ -1,5 +1,13 @@
 # Third-party notices
 
+SetFlow is a local-only Android DJ Set Builder derived from Myspoti v2.4.0 (`https://github.com/kota-zo/myspoti`, commit `95a24e7e4de82ec89d4ec11d5b05b146c44d78e7`) and distributed under the GNU General Public License v3.0 (see `LICENSE` and `AGENTS.md`).
+
+In Stage 02 (`02_LOCAL_ONLY_SHELL`), all Spotify WebView, streaming, extension, Cast, and network modules were removed from the build; only `:automix`, the Beat This! int8 ONNX asset, and the local Media3 audio processors (`SegueProcessor.kt`, `MixPreparation.kt`, `DeckEq.kt`, `AnalysisRetry.kt`, `AnalysisIdentity.kt`, `TrackDecoder.kt`, `EqualizerProcessor.kt`, `SpatialProcessor.kt`, `CrossfadeRamp.kt`) are retained in the binary. See `docs/STAGE_02_ATTRIBUTION_AND_REUSE.md` for the complete file-by-file inventory and modification log.
+
+Original upstream Myspoti notices are preserved below for provenance.
+
+---
+
 Myspoti is free software under the GNU General Public License v3.0 (see `LICENSE`).
 It builds on the projects below; their licences are compatible with the GPL-3.0.
 

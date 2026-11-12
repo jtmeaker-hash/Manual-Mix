@@ -1,30 +1,26 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Spotify Brand Colors -->
-    <color name="spotify_green">#FF1DB954</color>
-    <color name="spotify_black">#FF000000</color>
-    <color name="spotify_white">#FFFFFFFF</color>
-    <color name="spotify_dark_gray">#FF121212</color>
-    <color name="spotify_medium_gray">#FF535353</color>
-    <color name="spotify_light_gray">#FFB3B3B3</color>
+    <!-- SetFlow Studio Palette (Distinct from upstream branding) -->
+    <color name="setflow_obsidian">#FF0B0E14</color>
+    <color name="setflow_slate">#FF151A24</color>
+    <color name="setflow_slate_variant">#FF1F2735</color>
+    <color name="setflow_amber">#FFFFA726</color>
+    <color name="setflow_cyan">#FF26C6DA</color>
+    <color name="setflow_text_primary">#FFF3F5F8</color>
+    <color name="setflow_text_secondary">#FFA5B0C2</color>
 
-    <!-- Material 3 Primary Colors -->
-    <color name="primary">#FFE0E0E0</color>
-    <color name="on_primary">#FF121212</color>
-    <color name="primary_container">#FF2E2E2E</color>
-    <color name="on_primary_container">#FFF5F5F5</color>
+    <color name="primary">@color/setflow_amber</color>
+    <color name="on_primary">@color/setflow_obsidian</color>
+    <color name="primary_container">@color/setflow_slate_variant</color>
+    <color name="on_primary_container">@color/setflow_text_primary</color>
 
-    <!-- Material 3 Surface Colors -->
-    <color name="surface">@color/spotify_black</color>
-    <color name="on_surface">@color/spotify_white</color>
-    <color name="surface_variant">@color/spotify_black</color>
-    <color name="on_surface_variant">@color/spotify_light_gray</color>
+    <color name="surface">@color/setflow_slate</color>
+    <color name="on_surface">@color/setflow_text_primary</color>
+    <color name="surface_variant">@color/setflow_slate_variant</color>
+    <color name="on_surface_variant">@color/setflow_text_secondary</color>
 
-    <!-- Material 3 Background -->
-    <color name="background">@color/spotify_black</color>
-    <color name="on_background">@color/spotify_white</color>
-
-    <!-- Material 3 Status Bar -->
-    <color name="status_bar">#FF000000</color>
-    <color name="app_background">#FF121212</color>
+    <color name="background">@color/setflow_obsidian</color>
+    <color name="on_background">@color/setflow_text_primary</color>
+    <color name="status_bar">@color/setflow_obsidian</color>
+    <color name="app_background">@color/setflow_obsidian</color>
 </resources>

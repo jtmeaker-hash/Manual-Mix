@@ -1,9 +1,9 @@
 # ADR-001: Source Strategy — Isolating `:automix` and Local Audio Components vs. In-Place Pruning of Upstream `:app`
 
 - **Date:** 2026-11-12
-- **Status:** Proposed (Tentative selection pending Stage 01 baseline build verification and Stage 02 execution)
+- **Status:** Accepted (Confirmed after Stage 01 baseline build & benchmark verification; executed in Stage 02)
 - **Owner:** SetFlow Engineering / Agent
-- **Stage:** Stage 00 (`00_REPO_INTAKE`)
+- **Stage:** Stage 00 (`00_REPO_INTAKE`) / Stage 02 (`02_LOCAL_ONLY_SHELL`)
 
 ---
 

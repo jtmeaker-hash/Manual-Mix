@@ -1,5 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- Textes des pages de bibliothèque du look Immersive : Récents, Téléchargé, Fichiers locaux, dossiers, Nouveautés (français). -->
-<resources>
-    <string name="immersive_pages_name_hint">Nom</string>
-</resources>

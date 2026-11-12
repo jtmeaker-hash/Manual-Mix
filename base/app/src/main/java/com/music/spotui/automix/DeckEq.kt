@@ -29,7 +29,7 @@ class DeckEq private constructor(private val dp: DynamicsProcessing) {
     fun release() { runCatching { dp.release() } }
 
     companion object {
-        fun attach(sessionId: Int): DeckEq? {
+        fun attach(sessionId: Int, onDiagnostic: ((String) -> Unit)? = null): DeckEq? {
             if (sessionId <= 0) return null
             return try {
                 // The only variant Android creates: the other was refused on every session, so no mix ever had its EQ.
@@ -46,7 +46,7 @@ class DeckEq private constructor(private val dp: DynamicsProcessing) {
                 dp.enabled = true
                 DeckEq(dp)
             } catch (e: Throwable) {
-                AutoMix.journal("EQ unavailable on session $sessionId: ${e.javaClass.simpleName}: ${e.message}")
+                onDiagnostic?.invoke("EQ unavailable on session $sessionId: ${e.javaClass.simpleName}: ${e.message}")
                 null
             }
         }

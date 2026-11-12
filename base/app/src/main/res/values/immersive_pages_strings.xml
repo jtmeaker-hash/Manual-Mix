@@ -1,5 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- Texts of the Immersive look's library pages: Recents, Downloaded, Local Files, folders, New releases (English default). -->
-<resources>
-    <string name="immersive_pages_name_hint">Name</string>
-</resources>
