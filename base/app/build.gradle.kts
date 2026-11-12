@@ -169,7 +169,7 @@ dependencies {
     debugImplementation(libs.compose.ui.tooling)
 
     // Native UI (ported from Spotui, GPL-3.0)
-    implementation("androidx.navigation:navigation-compose:2.9.0")
+    implementation("androidx.navigation:navigation-compose:2.10.2")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.9.0")
     implementation("com.github.bumptech.glide:compose:1.0.0-beta01")
     implementation("androidx.palette:palette-ktx:1.0.0")
