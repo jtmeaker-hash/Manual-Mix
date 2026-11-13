@@ -43,6 +43,8 @@ import androidx.compose.ui.unit.sp
 import app.setflow.analysis.AnalysisStatus
 import app.setflow.db.ProjectDetailSnapshot
 import app.setflow.domain.LocalTrackRecord
+import app.setflow.playback.SetPlaybackQueueState
+import app.setflow.playback.SetQueuePhase
 import java.util.Locale
 
 /**
@@ -61,6 +63,12 @@ fun SetDetailScreen(
     projectDetail: ProjectDetailSnapshot?,
     libraryTracks: List<LocalTrackRecord>,
     analysisStatuses: Map<String, AnalysisStatus>,
+    queueState: SetPlaybackQueueState = SetPlaybackQueueState(),
+    onPlaySet: (setId: String) -> Unit = {},
+    onPauseSet: () -> Unit = {},
+    onResumeSet: () -> Unit = {},
+    onSkipNextTrack: () -> Unit = {},
+    onSkipPreviousTrack: () -> Unit = {},
     onOpenTransitionEditor: (edgeId: String) -> Unit,
     onAddTrackToSet: (trackId: String) -> Unit,
     onMoveOccurrenceUp: (occurrenceId: String) -> Unit,
@@ -74,6 +82,9 @@ fun SetDetailScreen(
     val edgesByPair = projectDetail?.edges.orEmpty().associateBy {
         it.edge.outgoingOccurrenceId to it.edge.incomingOccurrenceId
     }
+
+    val isCurrentSetPlaying = queueState.projectId == setId && queueState.isPlaying
+    val isCurrentSetLoaded = queueState.projectId == setId && queueState.phase != SetQueuePhase.IDLE && queueState.phase != SetQueuePhase.SET_COMPLETED
 
     LazyColumn(
         modifier = modifier
@@ -117,18 +128,26 @@ fun SetDetailScreen(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Button(
-                            onClick = {},
-                            enabled = false, // Disabled until Stage 10 (Task 1)
+                            onClick = {
+                                if (isCurrentSetPlaying) {
+                                    onPauseSet()
+                                } else if (isCurrentSetLoaded) {
+                                    onResumeSet()
+                                } else {
+                                    onPlaySet(setId)
+                                }
+                            },
+                            enabled = occurrences.isNotEmpty(),
                             modifier = Modifier
                                 .weight(1f)
                                 .height(48.dp)
                                 .semantics {
-                                    contentDescription = "Play full set (Playback engine arrives in Stage 10)"
+                                    contentDescription = if (isCurrentSetPlaying) "Pause set" else "Play full set"
                                 }
                         ) {
                             Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Play (Stage 10)")
+                            Text(if (isCurrentSetPlaying) "Pause Set" else if (isCurrentSetLoaded) "Resume Set" else "Play Set")
                         }
 
                         OutlinedButton(
@@ -161,6 +180,64 @@ fun SetDetailScreen(
                             Icon(Icons.Default.Undo, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(6.dp))
                             Text("Undo Last Reorder / Removal")
+                        }
+                    }
+                }
+            }
+        }
+
+        // 1b. Active Playback Controls Banner (Stage 10)
+        if (isCurrentSetLoaded) {
+            item(key = "set_playback_banner_$setId") {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "Now Playing: ${queueState.currentTrackTitle.ifEmpty { "Track" }} — ${queueState.currentTrackArtist.ifEmpty { "Artist" }}",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                        Text(
+                            text = queueState.statusMessage,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.85f)
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = onSkipPreviousTrack,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(48.dp)
+                            ) {
+                                Text("Prev")
+                            }
+                            Button(
+                                onClick = {
+                                    if (isCurrentSetPlaying) onPauseSet() else onResumeSet()
+                                },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(48.dp)
+                            ) {
+                                Text(if (isCurrentSetPlaying) "Pause" else "Resume")
+                            }
+                            OutlinedButton(
+                                onClick = onSkipNextTrack,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(48.dp)
+                            ) {
+                                Text("Next")
+                            }
                         }
                     }
                 }

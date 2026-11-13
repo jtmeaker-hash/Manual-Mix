@@ -68,6 +68,27 @@ data class ArmedTransitionBinding(
                 reason = "Project revision changed while armed: expected $projectRevision, actual ${detail.project.editRevision}"
             )
         }
+        if (outgoingOccurrenceId == incomingOccurrenceId || edgeId.startsWith("track_")) {
+            val occ = detail.occurrences.firstOrNull { it.occurrence.occurrenceId == outgoingOccurrenceId }
+                ?: return ValidationResult.Mismatch(
+                    errorCode = AudioErrorCode.A01_SOURCE_MISSING,
+                    reason = "Occurrence $outgoingOccurrenceId not found in project $projectId"
+                )
+            if (occ.track.availabilityState != TrackAvailabilityState.AVAILABLE.name) {
+                return ValidationResult.Mismatch(
+                    errorCode = AudioErrorCode.A01_SOURCE_MISSING,
+                    reason = "Track ${occ.track.trackId} is ${occ.track.availabilityState}"
+                )
+            }
+            val actualKeyA = occ.track.audioFingerprint ?: occ.track.contentFingerprint ?: occ.track.trackId
+            if (actualKeyA != audioKeyA) {
+                return ValidationResult.Mismatch(
+                    errorCode = AudioErrorCode.A05_SOURCE_CHANGED,
+                    reason = "Source audio fingerprint changed (expected $audioKeyA, found $actualKeyA)"
+                )
+            }
+            return ValidationResult.Valid
+        }
         val edgeSnap = detail.edges.firstOrNull { it.edge.edgeId == edgeId }
             ?: return ValidationResult.Mismatch(
                 errorCode = AudioErrorCode.A05_SOURCE_CHANGED,
@@ -107,8 +128,8 @@ data class ArmedTransitionBinding(
                 reason = "Incoming track ${occB.track.trackId} is ${occB.track.availabilityState}"
             )
         }
-        val actualKeyA = occA.track.audioFingerprint ?: occA.track.contentFingerprint
-        val actualKeyB = occB.track.audioFingerprint ?: occB.track.contentFingerprint
+        val actualKeyA = occA.track.audioFingerprint ?: occA.track.contentFingerprint ?: occA.track.trackId
+        val actualKeyB = occB.track.audioFingerprint ?: occB.track.contentFingerprint ?: occB.track.trackId
         if (actualKeyA != audioKeyA || actualKeyB != audioKeyB) {
             return ValidationResult.Mismatch(
                 errorCode = AudioErrorCode.A05_SOURCE_CHANGED,

@@ -198,6 +198,12 @@ fun SetFlowAppShell(
                         projectDetail = state.activeProjectDetail,
                         libraryTracks = state.tracks,
                         analysisStatuses = state.analysisStatuses,
+                        queueState = state.queueState,
+                        onPlaySet = { id -> viewModel.controller.playSet(id) },
+                        onPauseSet = { viewModel.controller.pauseSet() },
+                        onResumeSet = { viewModel.controller.resumeSet() },
+                        onSkipNextTrack = { viewModel.controller.skipToNextTrack() },
+                        onSkipPreviousTrack = { viewModel.controller.skipToPreviousTrack() },
                         onOpenTransitionEditor = { edgeId ->
                             if (viewModel.controller.openTransitionEditor(setId, edgeId)) {
                                 navController.navigate(SetFlowRoute.TransitionEditor(setId, edgeId).routePattern)

@@ -113,6 +113,8 @@ interface SetFlowServiceBoundary {
     val analysisManager: app.setflow.analysis.TrackAnalysisEngine
     val transitionManager: app.setflow.transition.TransitionOverrideManager
     val twoDeckController: TwoDeckPlaybackController
+    val setPlaybackQueueController: app.setflow.playback.SetPlaybackQueueController
+    val playbackResumeStore: app.setflow.playback.PlaybackResumeStore
     val playbackController: PlaybackSessionController
     val transitionPreviewBridge: app.setflow.playback.TransitionPreviewAudioBridge
     val diagnostics: DiagnosticsRingBuffer
@@ -329,6 +331,16 @@ class LocalOnlyShellServiceGraph(
         database = projectDatabase,
         diagnostics = diagnostics
     )
+
+    override val setPlaybackQueueController: app.setflow.playback.SetPlaybackQueueController =
+        app.setflow.playback.SetPlaybackQueueController(
+            database = projectDatabase,
+            twoDeckController = twoDeckController,
+            diagnostics = diagnostics
+        )
+
+    override val playbackResumeStore: app.setflow.playback.PlaybackResumeStore =
+        app.setflow.playback.PlaybackResumeStore(preferences = null)
 
     override val playbackController: PlaybackSessionController
         get() = twoDeckController

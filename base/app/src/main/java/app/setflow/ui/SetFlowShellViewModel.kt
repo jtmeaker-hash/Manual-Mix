@@ -20,6 +20,7 @@ import app.setflow.domain.RelinkCandidateEvaluation
 import app.setflow.domain.SetDetailPlaceholderState
 import app.setflow.domain.SetSummary
 import app.setflow.domain.TrackImportSource
+import app.setflow.playback.SetPlaybackQueueState
 import app.setflow.service.AnalysisEngineStatus
 import app.setflow.service.LocalOnlyShellServiceGraph
 import app.setflow.service.PlaybackShellState
@@ -90,6 +91,7 @@ data class SetFlowShellUiState(
     val waveformStateB: WaveformTileState = WaveformTileState.Loading,
     val analysisStatuses: Map<String, AnalysisStatus> = emptyMap(),
     val playbackState: PlaybackShellState = PlaybackShellState(),
+    val queueState: SetPlaybackQueueState = SetPlaybackQueueState(),
     val analysisStatus: AnalysisEngineStatus = AnalysisEngineStatus(
         engineRetained = true,
         modelAssetPath = LocalOnlyShellServiceGraph.MODEL_ASSET_RELATIVE_PATH,
@@ -119,6 +121,14 @@ class SetFlowShellController(
 
     private val _uiState = MutableStateFlow(buildSnapshot(listOf(SetFlowRoute.Sets)))
     val uiState: StateFlow<SetFlowShellUiState> = _uiState.asStateFlow()
+
+    init {
+        scope.launch {
+            services.setPlaybackQueueController.queueState.collect {
+                refreshSnapshot()
+            }
+        }
+    }
 
     fun openSets() {
         stopPreviewAndClearTransition()
@@ -424,6 +434,44 @@ class SetFlowShellController(
     }
 
     // -------------------------------------------------------------------------
+    // Whole-Set Playback Actions (Stage 10)
+    // -------------------------------------------------------------------------
+
+    fun playSet(setId: String, startOccurrenceId: String? = null, initialPosUs: Long = 0L): Boolean {
+        val success = services.setPlaybackQueueController.startSet(setId, startOccurrenceId, initialPosUs)
+        refreshSnapshot()
+        return success
+    }
+
+    fun pauseSet() {
+        services.setPlaybackQueueController.pause()
+        refreshSnapshot()
+    }
+
+    fun resumeSet() {
+        services.setPlaybackQueueController.resume()
+        refreshSnapshot()
+    }
+
+    fun skipToNextTrack(): Boolean {
+        val success = services.setPlaybackQueueController.skipToNext()
+        refreshSnapshot()
+        return success
+    }
+
+    fun skipToPreviousTrack(): Boolean {
+        val success = services.setPlaybackQueueController.skipToPrevious()
+        refreshSnapshot()
+        return success
+    }
+
+    fun seekSetTimeline(globalUs: Long): Boolean {
+        val success = services.setPlaybackQueueController.seekToGlobalUs(globalUs)
+        refreshSnapshot()
+        return success
+    }
+
+    // -------------------------------------------------------------------------
     // Set & Occurrence Actions (Stage 04 & Stage 08)
     // -------------------------------------------------------------------------
 
@@ -591,6 +639,7 @@ class SetFlowShellController(
             waveformStateB = activeWaveformB,
             analysisStatuses = analysisStatuses,
             playbackState = services.playbackController.state.value,
+            queueState = services.setPlaybackQueueController.queueState.value,
             analysisStatus = services.analysisEngine.status.value,
             offlineOnlyEnforced = services.offlineOnlyEnforced,
             accountRequired = services.accountRequired,

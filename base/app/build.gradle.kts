@@ -11,14 +11,14 @@ android {
     namespace = "app.setflow"
     compileSdk = 37
 
-    val version = (findProperty("appVersionName") as String?) ?: "0.9.0-stage09"
+    val version = (findProperty("appVersionName") as String?) ?: "0.10.0-stage10"
 
     defaultConfig {
         applicationId = "app.setflow"
         manifestPlaceholders["appLabel"] = "SetFlow"
         minSdk = 29
         targetSdk = 36
-        versionCode = (findProperty("appVersionCode") as String?)?.toIntOrNull() ?: 9
+        versionCode = (findProperty("appVersionCode") as String?)?.toIntOrNull() ?: 10
         versionName = version
         (findProperty("abis") as String?)?.let { ndk { abiFilters += it.split(",") } }
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -97,6 +97,7 @@ dependencies {
     // Local Media3 playback & decoding (no DASH/network streaming libraries)
     implementation("androidx.media3:media3-exoplayer:1.8.0")
     implementation("androidx.media3:media3-datasource:1.8.0")
+    implementation("androidx.media3:media3-session:1.8.0")
 
     // Unit testing
     testImplementation("junit:junit:4.13.2")

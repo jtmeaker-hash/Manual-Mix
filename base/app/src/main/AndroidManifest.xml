@@ -8,6 +8,11 @@
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" tools:node="remove" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" tools:node="remove" />
 
+    <!-- Foreground service and notification permissions for Stage 10 Whole-Set Playback -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <application
         android:name="app.setflow.SetFlowApplication"
         android:allowBackup="false"
@@ -29,6 +34,17 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Service-owned MediaSessionService for continuous whole-set background playback (Stage 10) -->
+        <service
+            android:name="app.setflow.playback.SetPlaybackService"
+            android:foregroundServiceType="mediaPlayback"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="androidx.media3.session.MediaSessionService" />
+                <action android:name="android.media.browse.MediaBrowserService" />
+            </intent-filter>
+        </service>
     </application>
 
 </manifest>
