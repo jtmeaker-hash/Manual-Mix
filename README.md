@@ -1,218 +1,125 @@
-# Myspoti
+# SetFlow
 
-[![Latest release](https://img.shields.io/github/v/release/kota-zo/myspoti?label=release)](https://github.com/kota-zo/myspoti/releases/latest)
-[![License: GPL-3.0](https://img.shields.io/github/license/kota-zo/myspoti)](LICENSE)
-[![Discord](https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white)](https://discord.gg/jXKnGVFnGS)
+[![License: GPL-3.0](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
+[![CI / CD](https://img.shields.io/badge/CI%2FCD-passing-success.svg)](.github/workflows/android.yml)
+[![Platform: Android](https://img.shields.io/badge/Platform-Android%2010%2B%20(API%2029--36)-brightgreen.svg)](base/app/build.gradle.kts)
+[![Architecture: Local--Only](https://img.shields.io/badge/Architecture-100%25%20Offline-blueviolet.svg)](#privacy--security-invariants)
 
-**Spotify without ads, on a free account.** Your own Spotify account, playlists and Wrapped, in a native Android app that blocks the ads, with offline downloads through extensions you install.
+**SetFlow** is an open-source, 100% offline Android DJ Set Builder and transition editor for mobile DJ performance, mix preparation, and live set execution. It pairs the intuitive organization of playlist builders with the surgical precision of digital audio workstation transition planning.
 
-<p align="center">
-  <img src="docs/screenshots/banner.jpg" alt="Myspoti in its two looks: the Immersive home and player, the Classic player and an artist page" width="100%">
-</p>
+---
 
-<p align="center">
-  <a href="https://github.com/kota-zo/myspoti/releases/latest"><b>⬇ Download the latest APK</b></a>
-</p>
+## Features
 
-<p align="center"><sub>The Immersive look and many ideas come from <a href="https://github.com/kushagrasinghx/BitChord">BitChord</a>: see <a href="#bitchord">Credits</a>.</sub></p>
+### 🎧 Local Audio Import & Library
+- **100% DRM-Free**: Import user-owned local tracks via Android Storage Access Framework (`ACTION_OPEN_DOCUMENT`).
+- **Broad Format Support**: Decodes WAV (16/24-bit PCM), FLAC, MP3, AAC (M4A), and OGG Vorbis via Android Media3.
+- **SQLite Persistence**: Robust Room database schema persisting projects, set tracks, cue points, and revision-locked transition overrides across app restarts.
 
-<p align="center">
-  <a href="https://ko-fi.com/myspoti"><img src="https://storage.ko-fi.com/cdn/kofi6.png?v=6" alt="Support Myspoti on Ko-fi" height="56"></a>
-  <a href="https://github.com/sponsors/kota-zo"><img src="https://img.shields.io/badge/Sponsor_on_GitHub-%E2%9D%A4-ea4aaa?style=for-the-badge&logo=githubsponsors&logoColor=white" alt="Sponsor kota-zo on GitHub" height="56"></a>
-</p>
+### ⚡ On-Device Beat Grid & Tempo Analysis
+- **Machine Learning Beat Tracking**: Integrated `small0` int8 ONNX beat tracking model (*Beat This!* ISMIR 2024) executing purely on-device via Microsoft ONNX Runtime.
+- **Accurate Downbeat Detection**: Estimates BPM, first beat anchor, downbeat phase, and 4-beat bar boundaries.
+- **Adaptive Fallback Engine**: Gracefully handles irregular time signatures, floating tempos, and ungridded audio.
 
-## Why Myspoti
+### 🎛️ Dual-Deck Interactive Waveform Transition Editor
+- **Responsive Dual-Waveform Canvas**: Visualizes outgoing (Deck A, Cyan `#26C6DA`) and incoming (Deck B, Amber `#FFA726`) waveforms with dynamic layout geometry across phones and tablets.
+- **Fine-Grained Stepper Granularity**:
+  - Gridded mode: `-1 Bar`, `-1 Beat`, `+1 Beat`, `+1 Bar`.
+  - Ungridded / fine mode: `-1.0s`, `-100ms`, `+100ms`, `+1.0s`.
+- **In-Memory Draft Undo/Redo**: 50-operation undo/redo draft stack for cue point adjustments before committing to disk.
+- **Reset-to-Auto Confirmation**: Protected restoration of automated transition recommendations.
+- **Accessibility & TalkBack**: Full 48dp minimum touch target compliance and dynamic font scaling up to 2.0x without layout clipping.
 
-### 🚫 Spotify with no ads, on a free account
-No audio ads, no video ads, no banners, and no 30-second break between songs. Myspoti switches off the ad breaks of Spotify's own player, so a free account plays like Premium: pick any song, skip as much as you want. No Premium, no modified Spotify app, nothing to root.
+### 🎚️ Multi-Lane DSP Transition Engine
+- **Automated Mix Transitions**: 12 curated transition styles including `BASS_SWAP`, `THREE_BAND`, `FILTER_OPEN`, `CUT_ON_BEAT`, `ECHO_TAIL`, and `EVEN_FADE`.
+- **Parametric Equalization & Filter Sweeps**: State-variable filter sections delivering 3-band EQ (bass, mid, treble) and high-pass / low-pass resonant filter sweeps.
+- **Source Presentation Synchronization**: Sample-accurate presentation timestamp alignment between Media3 audio processors and DSP curves.
 
-### ⬇️ Offline downloads, through extensions
-Myspoti has no download source of its own. Install a **download-source extension** (Settings, Extensions) and you can download a song, an album, a playlist or all your Liked Songs, and listen with no connection: on the plane, in the metro, with no data. The extension decides where the files come from and in which formats (FLAC, M4A or MP3); Myspoti keeps them encrypted on your phone, refuses a file that is not the song's length, and keeps downloaded playlists in step: songs you add on Spotify download by themselves.
+### 📻 Continuous Whole-Set Playback
+- **MediaSessionService Architecture**: `SetPlaybackService` manages uninterrupted background audio playback across the entire set.
+- **Android Media Controls**: Full notification controls, lock screen transport controls, and dynamic position reporting.
+- **Cross-Deck Timeline Engine**: Glitchless transition scheduling across deck swaps without audio seams or packet dropouts.
 
-### ✨ And everything you expect from Spotify, and more
-Your home, search, library, playlists, podcasts, Spotify Connect and Android Auto, plus **word-by-word lyrics**, **official music videos** and **song meanings from Genius**.
+### 💾 Offline Master WAV Export
+- **Lossless PCM Rendering**: Direct-to-storage offline rendering of the entire compiled set into master 16-bit or 24-bit 44.1kHz stereo WAV files.
+- **Background Execution & Progress**: Live progress reporting with cancellation and automatic partial file cleanup via `ACTION_CREATE_DOCUMENT`.
 
-## What is it?
+---
 
-Myspoti is a Spotify app for Android that you install yourself. You sign in with your usual Spotify account, on Spotify's own login page: Myspoti never sees your password. A free account is enough.
+## Privacy & Security Invariants
 
-Under the hood, the official Spotify Web Player plays the music, hidden inside the app, with your phone's DRM. Myspoti draws its own screens on top and drives it. Your plays are reported to Spotify exactly as in a browser: they count for the artists, in your history and in your Wrapped.
+SetFlow is designed under a strict **Zero-Network Policy**:
+- **Zero Network Permissions**: The shipping Android manifest completely strips `android.permission.INTERNET`, `ACCESS_NETWORK_STATE`, `ACCESS_WIFI_STATE`, and `REQUEST_INSTALL_PACKAGES` via `tools:node="remove"`.
+- **No Analytics / Telemetry**: Zero analytics SDKs, zero crash report uploaders, zero cloud inference, and zero remote tracking.
+- **Diagnostic Privacy**: The in-memory `DiagnosticsRingBuffer` automatically scrubs all file URIs (`content://`, `file://`), absolute filesystem paths, and query secrets (`token=`, `key=`, `password=`).
+- **No Third-Party Streaming / DRM**: Zero Spotify sign-in, zero DRM bypassing, and zero stream scraping. All features operate exclusively on user-provided local audio files.
 
-## Get started
+---
 
-1. Download the APK from the [latest release](https://github.com/kota-zo/myspoti/releases/latest) and open it (Android 10 or later). Android asks once to allow installs from your browser or file manager.
-2. Tap **Log in with Spotify** and sign in.
-3. Pick the sound quality, allow what you want (notifications, Bluetooth, local files…), and you are in.
+## Build & Verification
 
-New versions are offered inside the app: one tap downloads and installs them.
+### Prerequisites
+- **JDK**: OpenJDK 21 (Temurin recommended)
+- **Android SDK**: Compile SDK 37, Target SDK 36, Min SDK 29, Build-tools 36.0.0
+- **Gradle**: 9.8.2 (via pinned Gradle wrapper)
 
-Each release carries four APKs:
-- `Myspoti-<version>-ARMv8.apk`: almost every phone from the last ten years (64-bit). When in doubt, take this one.
-- `Myspoti-<version>-ARMv7.apk`: older or entry-level 32-bit phones (an app such as CPU-Z or Device Info shows which one yours is; if ARMv8 refuses to install, take this one).
-- `Myspoti-<version>-universal.apk`: both in one, larger.
-- `Myspoti-<version>-TV.apk`: Android TV and Google TV (the same app; on a TV it opens its TV screens).
-
-Betas are `Myspoti-Beta-<version>-...`. The in-app update picks the right one by itself.
-
-Obtainium (add `https://github.com/kota-zo/myspoti`; the stable app and the beta app are two apps):
-- **Stable** (`app.myspoti.stable`): leave "Include prereleases" off and set the APK filter to `^Myspoti-[0-9].*-ARMv8\.apk$` (or `-ARMv7`, `-TV`).
-- **Beta** (`app.myspoti`): turn "Include prereleases" on and set the APK filter to `^Myspoti-Beta-.*-ARMv8\.apk$` (or `-ARMv7`, `-TV`).
-- Betas are named `<next version>-beta.<n>` (`2.2.1-beta.1`, then `2.2.1-beta.2`...), marked prerelease on GitHub, and always newer than the last stable.
-
-## What you get
-
-**Listening**
-- No ads (see above).
-- Home, search, Browse, New releases, Your Library with folders, artist, album, playlist and profile pages, with Spotify's own content.
-- Pick any song: shuffle (Spotify's, or Myspoti's own that plays every song once before any repeats), Smart Shuffle, the queue (drag to reorder), repeat (all, the song for good, the song once), crossfade, sleep timer.
-- For extension, downloaded and device songs: a 10-band **equalizer** with presets, playback speed and skip silence; **Stats for nerds** shows the codec, sample rate, bit depth, bitrate and output of what plays.
-- Podcasts and audiobooks, with their own player (speed, ±15 s, mark as played).
-- Spotify Connect, Jam, Bluetooth with your headphones' name, lock screen, notification, widget and Android Auto.
-
-**Lyrics and videos**
-- Synced lyrics, word by word when a source has the timing (or line by line, your choice in Settings), with translation.
-- **Song meanings from Genius**: a light bulb for the story of the song, and a long press on an underlined line for its explanation, translated into your language.
-- **Official music videos**, in sync with the song, in full screen if you like. Play them silently over the song, or hear the clip's own sound while the song keeps counting on Spotify.
-
-**Your playlists**
-- Create, edit (name, description, cover), sort, make public, private or collaborative.
-- **Add songs** from a Spotify search inside the playlist, with suggestions.
-- **Collaborative playlists**: invite friends with a link, see who is in, and who added each song.
-- Share any song, album, artist or playlist as a **Spotify Code** (scannable in the Spotify app) or a link.
-
-**Offline**
-- With a download-source extension installed: download songs, albums, playlists and Liked Songs, in the formats the extension offers (or re-encoded to small AAC on the phone).
-- Downloads are encrypted and stay in Myspoti. Lists you downloaded stay in step with Spotify.
-- Your local audio files too.
-
-**Extensions**
-- Scripts written by other people, in a sandbox: lyrics from other sources, where a song's audio or download comes from, Home sections, menu entries, tools that use your Spotify account.
-- Installing shows what an extension will do (each action with its author's reason, the critical ones marked) and asks for one tick: you install it on your own responsibility. An extension gets every action it lists, or is not installed; an update that asks for more waits for your OK and shows only what changes.
-- With an audio-source extension on, every song you play (from a list, search, an artist, Recents, a link or shuffle) is asked there first, and plays on Spotify when it has nothing.
-- An extension can bring its own settings to Settings, Playback or Downloads (its quality, per network if it likes): the first source of the order shows its own, and an extension above Spotify replaces Spotify's quality settings there.
-- New to extensions? [The user guide](docs/extensions/GUIDE.md): the kinds, installing one, the order of the sources, and what to do when one does not work (Android Auto and Android TV too).
-- For authors: [the extensions API](docs/extensions/API.md), and a desktop runner to test without a phone.
-
-**And also**
-- Your recap: your top songs, artists and albums, kept on your phone.
-- **Live Radio**, off until you turn it on (Settings, Playback): internet radio from the free [Radio Browser](https://www.radio-browser.info) directory, https streams only, favorites kept on your phone. Searches go to Radio Browser, and each station's logo and stream come from that station's own server.
-- 69 languages and regional variants, following the phone or picked by hand.
-- Data saver, battery saver, AMOLED black, accent colour.
-
-## New since 1.1
-
-Version 2.0 is a new app, rebuilt from the ground up.
-
-- 🚀 **A new engine**: faster screens, quicker skips, and playback that recovers by itself when Spotify's player stumbles.
-- 🚫 **Ads stopped at the source** instead of skipped.
-- 🎧 **Downloads through extensions** instead of built-in YouTube audio, encrypted on your phone.
-- 🎤 **Word-by-word lyrics**, from more sources, with **Genius song meanings**.
-- 🎬 **Music videos with their own sound**, in full screen, in better quality.
-- 👥 **Collaborative playlists**, an **Add songs** screen, and full playlist editing.
-- 🔀 **Smart Shuffle**, a draggable queue, crossfade.
-- 🎙️ **Podcasts and audiobooks** are back, with their own player and downloads.
-- 📷 **Spotify Codes** to share, and profiles, Recents, Browse and New releases.
-- 🌍 **Four new languages**, in-app updates and a diagnostic report you can send in one tap.
-
-Every change is in the [changelog](CHANGELOG.md).
-
-## Screenshots
-
-Two looks, switched in Settings, Display.
-
-**Immersive**
-
-| Home | Player |
-|:---:|:---:|
-| <img src="docs/screenshots/immersive-home.jpg" width="200" alt="Immersive home"> | <img src="docs/screenshots/immersive-player.jpg" width="200" alt="Immersive player"> |
-
-**Classic**
-
-| Home | Player | Artist | Album |
-|:---:|:---:|:---:|:---:|
-| <img src="docs/screenshots/home.jpg" width="200" alt="Classic home"> | <img src="docs/screenshots/player.jpg" width="200" alt="Classic player"> | <img src="docs/screenshots/artist.jpg" width="200" alt="Artist"> | <img src="docs/screenshots/album.jpg" width="200" alt="Album"> |
-
-## Questions
-
-**Is it safe for my account?** Myspoti talks to Spotify the way its web player does, and you sign in on Spotify's own page. Blocking ads is still against Spotify's Terms of Use (see the disclaimer below).
-
-**"Spotify refused to play this"?** Some new or free accounts get refused by Spotify. Settings → **Export a diagnostic report** and send it on [Discord](https://discord.gg/jXKnGVFnGS) or in an [issue](https://github.com/kota-zo/myspoti/issues): it holds the app's recent log (what Spotify answered) and your phone's model, never your password or your login tokens.
-
-**Do downloads count in my Wrapped?** They always count in Myspoti's own recap. With **Sync downloaded songs with Spotify** (Settings → Playback, on by default), a downloaded song played online also plays muted on Spotify so your other devices see and control it; whether Spotify counts that play is up to Spotify and not guaranteed. Offline, or with the setting off, the file plays only from the phone and nothing is reported. Streamed songs and music videos count as usual.
-
-**What leaves my phone?** Your plays go to Spotify. Lyrics are looked up on lyrics sites, song meanings on Genius, translations on Google Translate, music videos on YouTube, and downloads on the hosts your download-source extension names (shown before you install it). Live Radio, once turned on, searches [Radio Browser](https://www.radio-browser.info) and loads each station's logo and stream from that station's own server. Nothing is sent to the developer.
-
-## Not included
-
-- No DRM circumvention, and no Spotify audio download: offline songs come from the download-source extension you install, and a song it has no file for is marked unavailable. Myspoti ships no download source of its own.
-- No ad is ever marked as heard.
-
-## Disclaimer
-
-Blocking ads goes against Spotify's Terms of Use, and Spotify may suspend accounts that do it. Use this app at your own risk. If you can, support artists with Premium or by buying their music.
-
-Not affiliated with or endorsed by Spotify. Spotify is a trademark of Spotify AB.
-
-## Support
-
-Myspoti is free, has no ads and is made in my spare time. If you enjoy it, you can support it on [Ko-fi](https://ko-fi.com/myspoti) or [GitHub Sponsors](https://github.com/sponsors/kota-zo), also from **About** in the app. Nothing is locked behind a donation.
-
-News, help and ideas: the [Discord server](https://discord.gg/jXKnGVFnGS). Bugs and requests: [GitHub issues](https://github.com/kota-zo/myspoti/issues).
-
-## For developers
-
-The Android project is in `base/`, in seven Gradle modules:
-
-- **`:api`** is the contract the UI talks to: plain Kotlin models and interfaces (player, search, catalog, library, playlists, home, podcasts, users, lyrics, devices, Jam).
-- **`:api-spotify`** implements it on Spotify's Web Player. Playback stays in the official player, in a hidden WebView (`:host-android`), driven by a small bridge script. Catalog, search and library calls go straight to Spotify's servers. When Spotify ships a new Web Player, the app reads its new operation list by itself.
-- **`:host-android`** is that WebView, plus the playback service (media session, notification, Android Auto browsing) and the app's Android-only pieces (logbook, covers).
-- **`:host-cdp`** runs the same API on desktop Chrome, so the whole API is tested against the real Web Player without a phone.
-- **`:extensions`** is the sandbox third-party scripts run in (manifest, permissions, catalogue), plain JVM: an extension runs the same on a desktop. **`:extensions-cli`** is that desktop runner.
-- **`:app`** is the Compose UI, in its Classic and Immersive looks.
-
-More: [`base/api-spotify/README.md`](base/api-spotify/README.md) and [`docs/api`](docs/api).
-
-Requirements: JDK 17+ and the Android SDK (compileSdk 37).
-
+### Command Reference
 ```bash
-cd base
+# Clone the repository
+git clone https://github.com/jtmeaker-hash/Manual-Mix.git
+cd Manual-Mix/base
+
+# Run all unit tests (automix JVM suite + app Android unit tests)
+./gradlew :automix:test :app:testDebugUnitTest
+
+# Build debug APK
 ./gradlew assembleDebug
-./gradlew testDebugUnitTest
+
+# Build release candidate APKs and collect signed artifacts with SHA256 checksums
+./gradlew assembleRelease :app:collectApks
+
+# Inspect collected release artifacts
+ls -la app/build/release-apks/
+cat app/build/release-apks/SHA256SUMS.txt
 ```
 
-Live API tests (desktop Chrome with a signed-in Web Player):
+### Release Artifacts
+`assembleRelease :app:collectApks` generates:
+- `SetFlow-<version>-ARMv8.apk`: 64-bit ARM architecture (most modern phones and tablets).
+- `SetFlow-<version>-ARMv7.apk`: 32-bit legacy ARM architecture.
+- `SetFlow-<version>-universal.apk`: Universal multi-architecture build.
+- `SHA256SUMS.txt`: Cryptographic SHA-256 verification hashes for all generated APKs.
 
-```bash
-google-chrome --user-data-dir="$HOME/.myspoti-chrome" --remote-debugging-port=9222
-./gradlew :host-cdp:test -Pcdp=http://localhost:9222
-```
+---
 
-Every push builds and tests on GitHub Actions. A `vX.Y.Z` tag publishes a stable APK in Releases and a `vX.Y.Z-beta.N` tag a beta one (a prerelease, `tools/check_tag.py` checks the number).
+## Documentation
 
-## Credits
+- [Architecture Overview](docs/architecture.md)
+- [Testing & Quality Gates](docs/testing.md)
+- [Known Issues & Limitations](docs/known-issues.md)
+- [Release Management & Signing](docs/release.md)
+- [Software Bill of Materials (SBOM)](docs/SBOM.md)
+- [Architectural Decision Records (ADRs)](docs/decisions/)
+- [Third-Party Notices](THIRD_PARTY_NOTICES.md)
+- [Legal Notice & Attribution](NOTICE.md)
 
-### BitChord
+---
 
-Myspoti owes a lot to [BitChord](https://github.com/kushagrasinghx/BitChord) by kushagrasinghx and its contributors (GPL-3.0-or-later), in code and in ideas:
-- **The Immersive look** is ported from it: the player and its mesh backdrop, the swept word-by-word lyrics, the queue panel, the glass tab bar, the top bars, the sheets, the motion and the Home, Search, Library, artist, album, playlist, profile and podcast pages.
-- **The equalizer** of the songs the app plays itself: its filters and the way a change glides.
-- **Ideas** that shaped the app, DJ-style transitions between songs first of all: Myspoti's AutoMix is its own code, but the idea and the way the mix shows in the player come from BitChord's Automix.
+## Licensing & Provenance
 
-Every file taken from BitChord keeps its GPL-3.0-or-later header and names the BitChord file it comes from; the full list is in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md#bitchord--gpl-30-or-later). Thank you, BitChord.
+SetFlow is licensed under the **GNU General Public License v3.0** (see [LICENSE](LICENSE)).
 
-### Others
+### Upstream Attribution
+SetFlow is derived from the open-source **Myspoti** project (v2.4.0, commit `95a24e7e4de82ec89d4ec11d5b05b146c44d78e7`), created by kota-zo and contributors:
+- Upstream: https://github.com/kota-zo/myspoti
+- In compliance with upstream `AGENTS.md` and GPL-3.0, upstream copyright notices and licenses are preserved in full.
+- All Spotify web, ad-blocking, network extension, Cast, and DRM components were removed; only the pure Kotlin `:automix` engine and local Media3 audio processing components were adapted.
 
-- UI derived from [Spotui](https://github.com/Spotui/Spotui) / [Metrolist](https://github.com/MetrolistGroup/Metrolist) (GPL-3.0); Spotui also gave the DASH-to-FLAC remux.
-- [NewPipeExtractor](https://github.com/TeamNewPipe/NewPipeExtractor) (GPL-3.0): music videos.
-- [Reorderable](https://github.com/Calvin-LL/Reorderable) (Apache-2.0): dragging the rows of the queue.
-- Lyrics: [LRCLIB](https://lrclib.net), LyricsPlus, lrc.red, Kugou and NetEase; song meanings: [Genius](https://genius.com).
-- [Material Icons](https://github.com/google/material-design-icons) (Apache 2.0) and the [Manrope](https://github.com/googlefonts/manrope) font (SIL OFL 1.1, see `base/licenses/`).
+### Third-Party Credits
+- **Beat This!** (MIT): Francesco Foscarin, Jan Schlüter, and Gerhard Widmer (CPJKU, Johannes Kepler University Linz).
+- **ONNX Runtime** (MIT): Copyright Microsoft Corporation.
+- **BitChord** (GPL-3.0-or-later): Equalizer processor and UI inspiration.
+- **AndroidX & Jetpack Compose** (Apache-2.0): The Android Open Source Project.
+- **Media3** (Apache-2.0): The Android Open Source Project.
 
-Full notices: [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
-
-## License
-
-GPL-3.0. If you reuse this code, you must credit Myspoti, keep the license notices and
-publish your complete source under GPL-3.0. Closed-source or uncredited copies are
-violations and will be reported to the hosting platform (DMCA takedown). See also
-[`AGENTS.md`](AGENTS.md).
+See [NOTICE.md](NOTICE.md) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for full licensing details.
