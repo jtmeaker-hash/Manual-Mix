@@ -75,6 +75,7 @@ fun SetDetailScreen(
     onMoveOccurrenceDown: (occurrenceId: String) -> Unit,
     onRemoveOccurrence: (occurrenceId: String) -> Unit,
     onUndoStructuralChange: () -> Unit,
+    onExportSet: (setId: String) -> Unit = {},
     onBackToSets: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -151,18 +152,18 @@ fun SetDetailScreen(
                         }
 
                         OutlinedButton(
-                            onClick = {},
-                            enabled = false, // Disabled until Stage 11 (Task 1)
+                            onClick = { onExportSet(setId) },
+                            enabled = occurrences.isNotEmpty(),
                             modifier = Modifier
                                 .weight(1f)
                                 .height(48.dp)
                                 .semantics {
-                                    contentDescription = "Export set to WAV (Offline WAV export arrives in Stage 11)"
+                                    contentDescription = "Export set to WAV audio file"
                                 }
                         ) {
                             Icon(Icons.Default.FileDownload, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Export (Stage 11)")
+                            Text("Export Set")
                         }
                     }
 

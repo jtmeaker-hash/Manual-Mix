@@ -545,6 +545,32 @@ class SetFlowShellController(
     }
 
     // -------------------------------------------------------------------------
+    // Offline Mix Export (Stage 11)
+    // -------------------------------------------------------------------------
+
+    fun exportSet(
+        setId: String,
+        destinationFile: java.io.File,
+        isCancelled: () -> Boolean = { false },
+        onProgress: (progress: Double, framesWritten: Long, totalFrames: Long) -> Unit = { _, _, _ -> }
+    ): app.setflow.export.ExportResult {
+        val detail = services.setRepository.getProjectDetail(setId)
+            ?: return app.setflow.export.ExportResult.Error(
+                jobId = java.util.UUID.randomUUID().toString(),
+                errorCode = app.setflow.domain.AudioErrorCode.A01_SOURCE_MISSING,
+                reason = "Project $setId not found for export"
+            )
+        val result = services.offlineSetRenderEngine.renderProject(
+            snapshot = detail,
+            destinationFile = destinationFile,
+            isCancelled = isCancelled,
+            onProgress = onProgress
+        )
+        refreshSnapshot()
+        return result
+    }
+
+    // -------------------------------------------------------------------------
     // Local Track Import & Relink Actions (Stage 03)
     // -------------------------------------------------------------------------
 

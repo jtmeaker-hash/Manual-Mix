@@ -229,6 +229,13 @@ fun SetFlowAppShell(
                             val rev = state.activeProjectDetail?.project?.editRevision ?: 1L
                             viewModel.controller.undoLastSetStructuralChange(setId, rev)
                         },
+                        onExportSet = { id ->
+                            val exportFile = java.io.File(
+                                android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS),
+                                "SetFlow_${id}_export.wav"
+                            )
+                            viewModel.controller.exportSet(id, exportFile)
+                        },
                         onBackToSets = {
                             viewModel.controller.openSets()
                             navController.popBackStack(SetFlowRoute.Sets.routePattern, inclusive = false)

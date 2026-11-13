@@ -117,6 +117,7 @@ interface SetFlowServiceBoundary {
     val playbackResumeStore: app.setflow.playback.PlaybackResumeStore
     val playbackController: PlaybackSessionController
     val transitionPreviewBridge: app.setflow.playback.TransitionPreviewAudioBridge
+    val offlineSetRenderEngine: app.setflow.export.OfflineSetRenderEngine
     val diagnostics: DiagnosticsRingBuffer
     val offlineOnlyEnforced: Boolean
     val accountRequired: Boolean
@@ -348,6 +349,12 @@ class LocalOnlyShellServiceGraph(
     override val transitionPreviewBridge: app.setflow.playback.TransitionPreviewAudioBridge =
         app.setflow.playback.TransitionPreviewAudioBridge(
             playbackController = twoDeckController,
+            diagnostics = diagnostics
+        )
+
+    override val offlineSetRenderEngine: app.setflow.export.OfflineSetRenderEngine =
+        app.setflow.export.OfflineSetRenderEngine(
+            database = projectDatabase,
             diagnostics = diagnostics
         )
 
