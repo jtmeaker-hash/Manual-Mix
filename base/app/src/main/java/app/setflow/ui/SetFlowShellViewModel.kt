@@ -222,12 +222,43 @@ class SetFlowShellController(
      */
     fun toggleTransitionPreview() {
         val current = activeTransitionDraft ?: return
-        val nextPlaying = !current.isPreviewPlaying
-        activeTransitionDraft = current.copy(isPreviewPlaying = nextPlaying)
-        services.diagnostics.record(
-            category = "Preview",
-            message = "Draft preview ${if (nextPlaying) "started" else "stopped"} for edgeId=${current.edgeId} (PREVIEW UNSAVED)"
-        )
+        if (!current.isPreviewPlaying) {
+            val success = current.validationResult as? TransitionResolutionResult.Success ?: run {
+                services.diagnostics.record(
+                    category = "Preview",
+                    message = "Cannot preview invalid transition draft: ${current.validationErrors.joinToString("; ")}"
+                )
+                return
+            }
+            val edgeSnap = services.projectDatabase.getEdgeCompleteSnapshot(current.edgeId)
+            val outOccId = edgeSnap?.edge?.outgoingOccurrenceId ?: "occA"
+            val inOccId = edgeSnap?.edge?.incomingOccurrenceId ?: "occB"
+
+            services.transitionPreviewBridge.startPreview(
+                projectId = current.setId,
+                projectRevision = current.projectRevision,
+                edgeId = current.edgeId,
+                edgePlanRevision = current.edgeRevision,
+                outgoingOccurrenceId = outOccId,
+                incomingOccurrenceId = inOccId,
+                outgoingTrack = current.outgoingTrack,
+                incomingTrack = current.incomingTrack,
+                draftPlan = success.plan,
+                planHashSha256 = success.planHashSha256
+            )
+            activeTransitionDraft = current.copy(isPreviewPlaying = true)
+            services.diagnostics.record(
+                category = "Preview",
+                message = "Draft preview started for edgeId=${current.edgeId} planHash=${success.planHashSha256.take(8)} (PREVIEW UNSAVED)"
+            )
+        } else {
+            services.transitionPreviewBridge.stopPreview()
+            activeTransitionDraft = current.copy(isPreviewPlaying = false)
+            services.diagnostics.record(
+                category = "Preview",
+                message = "Draft preview stopped for edgeId=${current.edgeId}"
+            )
+        }
         refreshSnapshot()
     }
 
@@ -327,13 +358,12 @@ class SetFlowShellController(
     }
 
     private fun stopPreviewAndClearTransition() {
-        activeTransitionDraft?.let {
-            if (it.isPreviewPlaying) {
-                services.diagnostics.record(
-                    category = "Preview",
-                    message = "Stopped preview on editor close"
-                )
-            }
+        if (activeTransitionDraft?.isPreviewPlaying == true || services.transitionPreviewBridge.isPreviewActive) {
+            services.transitionPreviewBridge.stopPreview()
+            services.diagnostics.record(
+                category = "Preview",
+                message = "Stopped preview and disarmed bridge on editor close"
+            )
         }
         activeTransitionDraft = null
         activeWaveformA = WaveformTileState.Loading

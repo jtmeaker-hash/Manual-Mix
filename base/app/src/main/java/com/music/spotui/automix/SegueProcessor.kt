@@ -77,6 +77,10 @@ class SegueProcessor : BaseAudioProcessor() {
         if (format.encoding == C.ENCODING_PCM_FLOAT) for (i in 0 until n) s[i] = pcm.getFloat()
         else for (i in 0 until n) s[i] = pcm.getShort() / 32768f
         d.process(s, frames, at)
+        for (i in 0 until n) {
+            val v = s[i]
+            s[i] = if (v.isFinite()) v.coerceIn(-1.0f, 1.0f) else 0.0f
+        }
         if (format.encoding == C.ENCODING_PCM_FLOAT) for (i in 0 until n) out.putFloat(s[i])
         else for (i in 0 until n) out.putShort((s[i] * 32767f).toInt().coerceIn(-32768, 32767).toShort())
         out.flip()

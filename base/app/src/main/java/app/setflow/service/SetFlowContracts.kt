@@ -114,6 +114,7 @@ interface SetFlowServiceBoundary {
     val transitionManager: app.setflow.transition.TransitionOverrideManager
     val twoDeckController: TwoDeckPlaybackController
     val playbackController: PlaybackSessionController
+    val transitionPreviewBridge: app.setflow.playback.TransitionPreviewAudioBridge
     val diagnostics: DiagnosticsRingBuffer
     val offlineOnlyEnforced: Boolean
     val accountRequired: Boolean
@@ -331,6 +332,12 @@ class LocalOnlyShellServiceGraph(
 
     override val playbackController: PlaybackSessionController
         get() = twoDeckController
+
+    override val transitionPreviewBridge: app.setflow.playback.TransitionPreviewAudioBridge =
+        app.setflow.playback.TransitionPreviewAudioBridge(
+            playbackController = twoDeckController,
+            diagnostics = diagnostics
+        )
 
     init {
         diagnostics.record(

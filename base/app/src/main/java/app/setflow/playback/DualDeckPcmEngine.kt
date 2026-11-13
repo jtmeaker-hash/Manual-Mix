@@ -1,9 +1,12 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 package app.setflow.playback
 
+import app.myspoti.automix.segue.LaneCurve
 import app.myspoti.automix.segue.LaneSide
 import app.myspoti.automix.segue.SegueDeck
+import app.myspoti.automix.segue.SegueFormat
 import app.myspoti.automix.segue.SeguePlan
+import app.myspoti.automix.segue.Target
 import app.setflow.db.SetFlowProjectDatabase
 import app.setflow.domain.AudioErrorCode
 import app.setflow.domain.TrackAvailabilityState
@@ -13,6 +16,7 @@ import kotlin.math.abs
 import kotlin.math.log10
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.pow
 import kotlin.math.roundToLong
 import kotlin.math.sqrt
 import kotlin.math.tanh
@@ -328,6 +332,26 @@ object DualDeckPcmEngine {
             null
         }
 
+        val levelLaneA = binding.seguePlan?.lanes?.firstOrNull { it.side == LaneSide.OUTGOING && it.target == Target.LEVEL }
+        val levelLaneB = binding.seguePlan?.lanes?.firstOrNull { it.side == LaneSide.INCOMING && it.target == Target.LEVEL }
+        val levelCurveA = levelLaneA?.let(::LaneCurve)
+        val levelCurveB = levelLaneB?.let(::LaneCurve)
+        val effectiveRateB = binding.ratePpmB.takeIf { it > 0L } ?: 1_000_000L
+
+        fun planGainA(sourceUsA: Long, fallback: Float): Float {
+            val curve = levelCurveA ?: return fallback
+            val spanUs = max(1L, binding.spanUs)
+            val u = (sourceUsA - binding.exitAnchorUs).toDouble() / spanUs * SegueFormat.T_MAX
+            return if (curve.isNull(u)) 0.0f else 10.0.pow(curve.value(u) / 20.0).toFloat()
+        }
+
+        fun planGainB(sourceUsB: Long, fallback: Float): Float {
+            val curve = levelCurveB ?: return fallback
+            val spanUs = max(1L, binding.spanUs)
+            val u = (sourceUsB - binding.entryAnchorUs).toDouble() * SegueFormat.RATE_NOMINAL / effectiveRateB / spanUs * SegueFormat.T_MAX
+            return if (curve.isNull(u)) 0.0f else 10.0.pow(curve.value(u) / 20.0).toFloat()
+        }
+
         var lastSourceFrameA = -1
         var lastSourceFrameB = -1
         var duplicatedFramesA = 0
@@ -409,17 +433,23 @@ object DualDeckPcmEngine {
                 gainB = CrossfadeRamp.incomingGain(progress)
             }
 
+            val sourceUsA = (srcFrameA * 1_000_000L) / sampleRate
+            val sourceUsB = (srcFrameB * 1_000_000L) / sampleRate
+
+            val measuredA = if (useSegueDspIfAvailable && segueDeckA != null && i < skipTriggerOffset) planGainA(sourceUsA, gainA) else gainA
+            val measuredB = if (useSegueDspIfAvailable && segueDeckB != null && i < skipTriggerOffset) planGainB(sourceUsB, gainB) else gainB
+
             if (i == 0) {
-                outGainStart = gainA
-                inGainStart = gainB
+                outGainStart = measuredA
+                inGainStart = measuredB
             }
             if (i == midOverlapIndex) {
-                outGainMid = gainA
-                inGainMid = gainB
+                outGainMid = measuredA
+                inGainMid = measuredB
             }
             if (i == effectiveOverlapFrames - 1) {
-                outGainEnd = gainA
-                inGainEnd = gainB
+                outGainEnd = if (skipAtOverlapFraction != null && i >= skipTriggerOffset) gainA else measuredA
+                inGainEnd = if (skipAtOverlapFraction != null && i >= skipTriggerOffset) gainB else measuredB
             }
 
             for (c in 0 until channels) {

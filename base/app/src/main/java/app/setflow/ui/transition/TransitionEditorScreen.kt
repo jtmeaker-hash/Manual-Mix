@@ -215,8 +215,36 @@ fun TransitionEditorScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
                             OriginBadge(origin = state.edgeOrigin, isDirty = state.isDirty)
+                            if (state.isPreviewPlaying) {
+                                Surface(
+                                    color = Color(0xFFE91E63),
+                                    shape = RoundedCornerShape(4.dp)
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.PlayArrow,
+                                            contentDescription = null,
+                                            tint = Color.White,
+                                            modifier = Modifier.size(12.dp)
+                                        )
+                                        Text(
+                                            text = "Previewing unsaved changes",
+                                            color = Color.White,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                            }
                             Text(
                                 text = "Plan Rev: ${state.edgeRevision} • Project Rev: ${state.projectRevision}",
                                 style = MaterialTheme.typography.bodySmall,
@@ -592,14 +620,15 @@ fun TransitionEditorScreen(
                 // Preview Button (Clearly marked "Preview Unsaved")
                 OutlinedButton(
                     onClick = onTogglePreview,
+                    enabled = state.isValid || state.isPreviewPlaying,
                     modifier = Modifier
                         .weight(1f)
                         .height(48.dp)
                         .semantics {
-                            contentDescription = if (state.isPreviewPlaying) {
-                                "Stop unsaved transition preview"
-                            } else {
-                                "Play unsaved transition preview audio"
+                            contentDescription = when {
+                                state.isPreviewPlaying -> "Stop unsaved transition preview"
+                                !state.isValid -> "Cannot preview unsaved transition: ${state.validationErrors.joinToString("; ")}"
+                                else -> "Play unsaved transition preview audio"
                             }
                         }
                 ) {
