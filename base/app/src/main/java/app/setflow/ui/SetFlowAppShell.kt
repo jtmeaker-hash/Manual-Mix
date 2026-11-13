@@ -266,8 +266,20 @@ fun SetFlowAppShell(
                                     navController.popBackStack()
                                 }
                             },
-                            onResetToAuto = {
+                            onUndoDraft = {
+                                viewModel.controller.undoTransitionDraft()
+                            },
+                            onRedoDraft = {
+                                viewModel.controller.redoTransitionDraft()
+                            },
+                            onRequestResetToAuto = {
+                                viewModel.controller.requestResetTransitionToAuto()
+                            },
+                            onConfirmResetToAuto = {
                                 viewModel.controller.resetTransitionToAuto()
+                            },
+                            onDismissResetDialog = {
+                                viewModel.controller.dismissResetConfirmationDialog()
                             },
                             onTogglePreview = {
                                 viewModel.controller.toggleTransitionPreview()
@@ -327,24 +339,30 @@ private fun SetsAndLocalTracksScreen(
         ) {
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    text = "Stage 04 — Crash-Safe Set & Transition Persistence",
+                    text = "SetFlow • Offline DJ Set Studio",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold
                 )
                 Text(
-                    text = "Offline-first • SQLite v3 migrated storage • Adjacency-scoped edges • SAF local audio.",
+                    text = "Craft seamless, beat-matched DJ sets with precision transition editing, continuous two-deck playback, and lossless WAV export.",
                     style = MaterialTheme.typography.bodyMedium
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = onLaunchSafMultiPicker) {
-                        Text("Import Audio Files (SAF)")
+                    Button(
+                        onClick = onLaunchSafMultiPicker,
+                        modifier = Modifier.height(48.dp).semantics { contentDescription = "Import local audio tracks via Storage Access Framework" }
+                    ) {
+                        Text("Import Audio (SAF)")
                     }
-                    OutlinedButton(onClick = onVerifyAllTracks) {
+                    OutlinedButton(
+                        onClick = onVerifyAllTracks,
+                        modifier = Modifier.height(48.dp).semantics { contentDescription = "Verify storage access grants for imported tracks" }
+                    ) {
                         Text("Verify Grants")
                     }
                 }
                 Text(
-                    text = "Note: Two-deck audio playback and interactive waveform transition editing are NOT IMPLEMENTED in Stage 04 (Stages 05–10). Audio is inactive.",
+                    text = "Engine Status: Ready • Dual-Deck Playback Active • Lossless WAV Render Active",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.primary
                 )

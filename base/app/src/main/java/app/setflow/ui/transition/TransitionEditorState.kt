@@ -115,9 +115,16 @@ data class TransitionEditorState(
     val isAdvancedEqExpanded: Boolean = false,
     val edgeOrigin: EdgeOrigin = EdgeOrigin.AUTO,
     val committedPlanHash: String = "",
-    val showDirtyConfirmationDialog: Boolean = false
+    val showDirtyConfirmationDialog: Boolean = false,
+    val showResetConfirmationDialog: Boolean = false,
+    val undoStack: List<TransitionOverrideParams> = emptyList(),
+    val redoStack: List<TransitionOverrideParams> = emptyList()
 ) {
     val isDirty: Boolean get() = draftParams != initialParams
+
+    val canUndo: Boolean get() = undoStack.isNotEmpty()
+
+    val canRedo: Boolean get() = redoStack.isNotEmpty()
 
     val isValid: Boolean get() = validationResult is TransitionResolutionResult.Success
 

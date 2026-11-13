@@ -216,15 +216,58 @@ class SetFlowShellController(
 
     /**
      * Updates draft parameters in-memory without mutating the database (Task 5, Contract D12).
+     * Maintains a bounded undo history stack (Stage 13 Task 3).
      */
     fun updateTransitionDraft(params: TransitionOverrideParams) {
         val current = activeTransitionDraft ?: return
+        if (params == current.draftParams) return
         val resolution = services.transitionManager.preview(current.edgeId, params)
+        val newUndo = (listOf(current.draftParams) + current.undoStack).take(50)
         activeTransitionDraft = current.copy(
             draftParams = params,
-            validationResult = resolution
+            validationResult = resolution,
+            undoStack = newUndo,
+            redoStack = emptyList()
         )
         refreshSnapshot()
+    }
+
+    /**
+     * Undoes the last in-memory transition parameter change (Stage 13 Task 3).
+     */
+    fun undoTransitionDraft(): Boolean {
+        val current = activeTransitionDraft ?: return false
+        val previous = current.undoStack.firstOrNull() ?: return false
+        val newUndo = current.undoStack.drop(1)
+        val newRedo = (listOf(current.draftParams) + current.redoStack).take(50)
+        val resolution = services.transitionManager.preview(current.edgeId, previous)
+        activeTransitionDraft = current.copy(
+            draftParams = previous,
+            validationResult = resolution,
+            undoStack = newUndo,
+            redoStack = newRedo
+        )
+        refreshSnapshot()
+        return true
+    }
+
+    /**
+     * Redoes the last undone in-memory transition parameter change (Stage 13 Task 3).
+     */
+    fun redoTransitionDraft(): Boolean {
+        val current = activeTransitionDraft ?: return false
+        val next = current.redoStack.firstOrNull() ?: return false
+        val newRedo = current.redoStack.drop(1)
+        val newUndo = (listOf(current.draftParams) + current.undoStack).take(50)
+        val resolution = services.transitionManager.preview(current.edgeId, next)
+        activeTransitionDraft = current.copy(
+            draftParams = next,
+            validationResult = resolution,
+            undoStack = newUndo,
+            redoStack = newRedo
+        )
+        refreshSnapshot()
+        return true
     }
 
     /**
@@ -273,6 +316,24 @@ class SetFlowShellController(
     }
 
     /**
+     * Requests confirmation before resetting transition override to auto recommendation (Stage 13 Task 3).
+     */
+    fun requestResetTransitionToAuto() {
+        val current = activeTransitionDraft ?: return
+        activeTransitionDraft = current.copy(showResetConfirmationDialog = true)
+        refreshSnapshot()
+    }
+
+    /**
+     * Dismisses the reset-to-auto confirmation dialog without modifying the draft.
+     */
+    fun dismissResetConfirmationDialog() {
+        val current = activeTransitionDraft ?: return
+        activeTransitionDraft = current.copy(showResetConfirmationDialog = false)
+        refreshSnapshot()
+    }
+
+    /**
      * Resets transition override to automated recommendation (Task 5).
      */
     fun resetTransitionToAuto(): EdgeCompleteSnapshot? {
@@ -294,7 +355,10 @@ class SetFlowShellController(
             draftParams = resetParams,
             initialParams = resetParams,
             validationResult = resetResolution,
-            committedPlanHash = updatedSnap.resolvedPlan?.planHashSha256.orEmpty()
+            committedPlanHash = updatedSnap.resolvedPlan?.planHashSha256.orEmpty(),
+            showResetConfirmationDialog = false,
+            undoStack = emptyList(),
+            redoStack = emptyList()
         )
         services.setRepository.refreshSets()
         refreshSnapshot()

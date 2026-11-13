@@ -21,6 +21,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Redo
+import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
@@ -64,6 +66,7 @@ import app.myspoti.automix.segue.TransitionOverrideParams
 import app.setflow.db.EdgeOrigin
 import app.setflow.ui.waveform.WaveformTileState
 import kotlin.math.roundToLong
+import java.util.Locale
 
 /**
  * Focused transition editor screen for an exact adjacent track pair (Stage 08, STAGES/08_SET_BUILDER_UI.txt).
@@ -84,7 +87,11 @@ fun TransitionEditorScreen(
     waveformStateB: WaveformTileState,
     onDraftParamsChanged: (TransitionOverrideParams) -> Unit,
     onSaveTransition: () -> Unit,
-    onResetToAuto: () -> Unit,
+    onUndoDraft: () -> Unit,
+    onRedoDraft: () -> Unit,
+    onRequestResetToAuto: () -> Unit,
+    onConfirmResetToAuto: () -> Unit,
+    onDismissResetDialog: () -> Unit,
     onTogglePreview: () -> Unit,
     onNavigateBack: () -> Unit,
     onDismissDirtyDialog: () -> Unit,
@@ -105,6 +112,30 @@ fun TransitionEditorScreen(
     val bpm = state.outgoingAnalysis?.bpm?.takeIf { it > 0 }
         ?: state.incomingAnalysis?.bpm?.takeIf { it > 0 }
         ?: 155.0
+
+    // Reset to Auto confirmation dialog (Stage 13 Task 3)
+    if (state.showResetConfirmationDialog) {
+        AlertDialog(
+            onDismissRequest = onDismissResetDialog,
+            title = { Text("Reset Transition to Auto?") },
+            text = {
+                Text("This will discard your custom cue points, style overrides, and EQ adjustments, restoring the beat-matched automated recommendation.")
+            },
+            confirmButton = {
+                Button(
+                    onClick = onConfirmResetToAuto,
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                ) {
+                    Text("Reset to Auto")
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = onDismissResetDialog) {
+                    Text("Keep Custom")
+                }
+            }
+        )
+    }
 
     // Dirty confirmation dialog (Task 5)
     if (state.showDirtyConfirmationDialog) {
@@ -171,6 +202,33 @@ fun TransitionEditorScreen(
                 }
             },
             actions = {
+                IconButton(
+                    onClick = onUndoDraft,
+                    enabled = state.canUndo,
+                    modifier = Modifier
+                        .size(48.dp)
+                        .semantics { contentDescription = "Undo draft transition parameter edit" }
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.Undo,
+                        contentDescription = null,
+                        tint = if (state.canUndo) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                    )
+                }
+                IconButton(
+                    onClick = onRedoDraft,
+                    enabled = state.canRedo,
+                    modifier = Modifier
+                        .size(48.dp)
+                        .semantics { contentDescription = "Redo draft transition parameter edit" }
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.Redo,
+                        contentDescription = null,
+                        tint = if (state.canRedo) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                    )
+                }
+                Spacer(modifier = Modifier.width(4.dp))
                 Button(
                     onClick = onSaveTransition,
                     enabled = state.isValid && !state.isSaving,
@@ -327,6 +385,7 @@ fun TransitionEditorScreen(
                         currentUs = exitAnchorUs,
                         maxUs = outTrack.durationUs,
                         bpm = bpm,
+                        isGridded = state.isGridded,
                         onUpdateUs = { nextUs ->
                             onDraftParamsChanged(
                                 currentParams.copy(
@@ -344,6 +403,7 @@ fun TransitionEditorScreen(
                         currentUs = entryAnchorUs,
                         maxUs = inTrack.durationUs,
                         bpm = bpm,
+                        isGridded = state.isGridded,
                         onUpdateUs = { nextUs ->
                             onDraftParamsChanged(
                                 currentParams.copy(
@@ -641,9 +701,9 @@ fun TransitionEditorScreen(
                     Text(if (state.isPreviewPlaying) "Stop" else "Preview Unsaved", fontSize = 12.sp)
                 }
 
-                // Reset to Auto Button
+                // Reset to Auto Button (Triggers confirmation dialog per Stage 13 Task 3)
                 OutlinedButton(
-                    onClick = onResetToAuto,
+                    onClick = onRequestResetToAuto,
                     modifier = Modifier
                         .weight(0.9f)
                         .height(48.dp)
@@ -702,12 +762,15 @@ private fun AnchorStepperRow(
     currentUs: Long,
     maxUs: Long,
     bpm: Double,
+    isGridded: Boolean,
     onUpdateUs: (Long) -> Unit
 ) {
     val barDurationUs = (240.0 / bpm * 1_000_000.0).roundToLong().coerceAtLeast(1_000_000L)
+    val beatDurationUs = (60.0 / bpm * 1_000_000.0).roundToLong().coerceAtLeast(250_000L)
     val oneSecUs = 1_000_000L
+    val hundredMsUs = 100_000L
 
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -715,51 +778,107 @@ private fun AnchorStepperRow(
         ) {
             Text(label, style = MaterialTheme.typography.bodyMedium, color = color, fontWeight = FontWeight.SemiBold)
             Text(
-                "${String.format("%.2f", currentUs / 1_000_000.0)}s / ${String.format("%.2f", maxUs / 1_000_000.0)}s",
+                "${String.format(Locale.US, "%.2f", currentUs / 1_000_000.0)}s / ${String.format(Locale.US, "%.2f", maxUs / 1_000_000.0)}s",
                 style = MaterialTheme.typography.bodySmall,
                 fontWeight = FontWeight.Bold
             )
         }
 
+        // Musical Bar & Beat Steppers (Stage 13 Task 3)
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             OutlinedButton(
                 onClick = { onUpdateUs((currentUs - barDurationUs).coerceIn(0L, maxUs)) },
+                enabled = isGridded,
                 modifier = Modifier
                     .weight(1f)
-                    .height(48.dp),
+                    .height(48.dp)
+                    .semantics { contentDescription = "$label back by 1 bar" },
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)
             ) {
-                Text("-1 Bar", fontSize = 11.sp)
+                Text("-1 Bar", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
             }
+            OutlinedButton(
+                onClick = { onUpdateUs((currentUs - beatDurationUs).coerceIn(0L, maxUs)) },
+                enabled = isGridded,
+                modifier = Modifier
+                    .weight(1f)
+                    .height(48.dp)
+                    .semantics { contentDescription = "$label back by 1 beat" },
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)
+            ) {
+                Text("-1 Beat", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+            }
+            OutlinedButton(
+                onClick = { onUpdateUs((currentUs + beatDurationUs).coerceIn(0L, maxUs)) },
+                enabled = isGridded,
+                modifier = Modifier
+                    .weight(1f)
+                    .height(48.dp)
+                    .semantics { contentDescription = "$label forward by 1 beat" },
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)
+            ) {
+                Text("+1 Beat", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+            }
+            OutlinedButton(
+                onClick = { onUpdateUs((currentUs + barDurationUs).coerceIn(0L, maxUs)) },
+                enabled = isGridded,
+                modifier = Modifier
+                    .weight(1f)
+                    .height(48.dp)
+                    .semantics { contentDescription = "$label forward by 1 bar" },
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)
+            ) {
+                Text("+1 Bar", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+            }
+        }
+
+        // Time-based Fine Steppers: +/-1.0s and +/-100ms (Stage 13 Task 3)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
             OutlinedButton(
                 onClick = { onUpdateUs((currentUs - oneSecUs).coerceIn(0L, maxUs)) },
                 modifier = Modifier
                     .weight(1f)
-                    .height(48.dp),
+                    .height(48.dp)
+                    .semantics { contentDescription = "$label back by 1 second" },
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)
             ) {
                 Text("-1.0s", fontSize = 11.sp)
             }
             OutlinedButton(
+                onClick = { onUpdateUs((currentUs - hundredMsUs).coerceIn(0L, maxUs)) },
+                modifier = Modifier
+                    .weight(1f)
+                    .height(48.dp)
+                    .semantics { contentDescription = "$label back by 100 milliseconds" },
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)
+            ) {
+                Text("-100ms", fontSize = 11.sp)
+            }
+            OutlinedButton(
+                onClick = { onUpdateUs((currentUs + hundredMsUs).coerceIn(0L, maxUs)) },
+                modifier = Modifier
+                    .weight(1f)
+                    .height(48.dp)
+                    .semantics { contentDescription = "$label forward by 100 milliseconds" },
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)
+            ) {
+                Text("+100ms", fontSize = 11.sp)
+            }
+            OutlinedButton(
                 onClick = { onUpdateUs((currentUs + oneSecUs).coerceIn(0L, maxUs)) },
                 modifier = Modifier
                     .weight(1f)
-                    .height(48.dp),
+                    .height(48.dp)
+                    .semantics { contentDescription = "$label forward by 1 second" },
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)
             ) {
                 Text("+1.0s", fontSize = 11.sp)
-            }
-            OutlinedButton(
-                onClick = { onUpdateUs((currentUs + barDurationUs).coerceIn(0L, maxUs)) },
-                modifier = Modifier
-                    .weight(1f)
-                    .height(48.dp),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)
-            ) {
-                Text("+1 Bar", fontSize = 11.sp)
             }
         }
     }

@@ -5,6 +5,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -29,10 +30,12 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.setflow.ui.waveform.WaveformPeakTile
 import app.setflow.ui.waveform.WaveformTileState
+import java.util.Locale
 import kotlin.math.max
 import kotlin.math.min
 
@@ -67,15 +70,17 @@ fun DualWaveformCanvas(
 ) {
     val canvasHeightDp = 220.dp
 
-    Box(
+    BoxWithConstraints(
         modifier = modifier
             .fillMaxWidth()
             .height(canvasHeightDp)
             .background(Color(0xFF0F131C), RoundedCornerShape(8.dp))
             .semantics {
-                contentDescription = "Dual waveform timeline. Track A Exit anchor at ${exitAnchorUs / 1_000_000.0}s, Track B Entry anchor at ${entryAnchorUs / 1_000_000.0}s, overlap duration ${spanUs / 1_000_000.0}s."
+                contentDescription = "Dual waveform timeline. Track A Exit anchor at ${String.format(Locale.US, "%.1f", exitAnchorUs / 1_000_000.0)}s, Track B Entry anchor at ${String.format(Locale.US, "%.1f", entryAnchorUs / 1_000_000.0)}s, overlap duration ${String.format(Locale.US, "%.1f", spanUs / 1_000_000.0)}s."
             }
     ) {
+        val availableWidthDp = maxWidth
+
         if (stateA is WaveformTileState.Loading || stateB is WaveformTileState.Loading) {
             Box(
                 modifier = Modifier.fillMaxSize(),
@@ -91,7 +96,7 @@ fun DualWaveformCanvas(
                     )
                 }
             }
-            return@Box
+            return@BoxWithConstraints
         }
 
         val tileA = (stateA as? WaveformTileState.Ready)?.tile
@@ -184,6 +189,7 @@ fun DualWaveformCanvas(
             windowStartUs = windowStartUs,
             windowDurationUs = windowDurationUs,
             trackMaxUs = trackADurationUs,
+            availableWidthDp = availableWidthDp,
             color = ColorTrackA,
             isTop = true,
             onAnchorChanged = onExitAnchorChanged
@@ -196,6 +202,7 @@ fun DualWaveformCanvas(
             windowStartUs = windowStartUs,
             windowDurationUs = windowDurationUs,
             trackMaxUs = trackBDurationUs,
+            availableWidthDp = availableWidthDp,
             color = ColorTrackB,
             isTop = false,
             onAnchorChanged = onEntryAnchorChanged
@@ -210,6 +217,7 @@ private fun CueAnchorDraggableHandle(
     windowStartUs: Long,
     windowDurationUs: Long,
     trackMaxUs: Long,
+    availableWidthDp: Dp,
     color: Color,
     isTop: Boolean,
     onAnchorChanged: (Long) -> Unit
@@ -220,14 +228,15 @@ private fun CueAnchorDraggableHandle(
         modifier = Modifier
             .fillMaxSize()
     ) {
-        // Compute horizontal offset
+        // Compute horizontal offset responsive to actual measured viewport width
         val fraction = ((timeUs - windowStartUs).toFloat() / windowDurationUs).coerceIn(0.02f, 0.98f)
+        val handleStartDp = ((availableWidthDp * fraction) - 28.dp).coerceAtLeast(0.dp)
 
         Box(
             modifier = Modifier
                 .align(if (isTop) Alignment.TopStart else Alignment.BottomStart)
                 .padding(
-                    start = max(0, (fraction * 340).toInt()).dp,
+                    start = handleStartDp,
                     top = if (isTop) 4.dp else 0.dp,
                     bottom = if (isTop) 0.dp else 4.dp
                 )
@@ -247,7 +256,7 @@ private fun CueAnchorDraggableHandle(
                     )
                 }
                 .semantics {
-                    contentDescription = "$label anchor handle at ${timeUs / 1_000_000.0}s. Drag horizontally to adjust."
+                    contentDescription = "$label anchor handle at ${String.format(Locale.US, "%.1f", timeUs / 1_000_000.0)}s. Drag horizontally to adjust."
                 },
             contentAlignment = Alignment.Center
         ) {
@@ -257,7 +266,7 @@ private fun CueAnchorDraggableHandle(
                     .padding(horizontal = 8.dp, vertical = 4.dp)
             ) {
                 Text(
-                    text = "$label: ${String.format("%.1f", timeUs / 1_000_000.0)}s",
+                    text = "$label: ${String.format(Locale.US, "%.1f", timeUs / 1_000_000.0)}s",
                     color = Color.Black,
                     fontWeight = FontWeight.Bold,
                     fontSize = 11.sp
