@@ -149,17 +149,29 @@ jobs:
             echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
             echo "RELEASE_SIGNING_READY=true" >> "$GITHUB_ENV"
           else
-            echo "Release keystore secret $NAME not set; building unsigned/debug-signed candidate."
+            echo "Release keystore secret $NAME not set; generating fallback candidate keystore."
+            keytool -genkeypair -v -keystore "$RUNNER_TEMP/release.jks" -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=SetFlow Candidate,O=SetFlow,C=US"
             echo "RELEASE_SIGNING_READY=false" >> "$GITHUB_ENV"
+            echo "SETFLOW_KEYSTORE_PASSWORD=android" >> "$GITHUB_ENV"
+            echo "SETFLOW_KEY_ALIAS=androiddebugkey" >> "$GITHUB_ENV"
+            echo "SETFLOW_KEY_PASSWORD=android" >> "$GITHUB_ENV"
           fi
 
       - name: Release APK
         env:
           SETFLOW_KEYSTORE: ${{ runner.temp }}/release.jks
-          SETFLOW_KEYSTORE_PASSWORD: ${{ contains(github.ref_name, '-') && secrets.SETFLOW_KEYSTORE_PASSWORD || secrets.SETFLOW_STABLE_KEYSTORE_PASSWORD }}
-          SETFLOW_KEY_ALIAS: ${{ contains(github.ref_name, '-') && secrets.SETFLOW_KEY_ALIAS || secrets.SETFLOW_STABLE_KEY_ALIAS }}
-          SETFLOW_KEY_PASSWORD: ${{ contains(github.ref_name, '-') && secrets.SETFLOW_KEY_PASSWORD || secrets.SETFLOW_STABLE_KEY_PASSWORD }}
         run: |
+          if [ "$RELEASE_SIGNING_READY" = "true" ]; then
+            if [ "${{ contains(github.ref_name, '-') }}" = "true" ]; then
+              export SETFLOW_KEYSTORE_PASSWORD="${{ secrets.SETFLOW_KEYSTORE_PASSWORD }}"
+              export SETFLOW_KEY_ALIAS="${{ secrets.SETFLOW_KEY_ALIAS }}"
+              export SETFLOW_KEY_PASSWORD="${{ secrets.SETFLOW_KEY_PASSWORD }}"
+            else
+              export SETFLOW_KEYSTORE_PASSWORD="${{ secrets.SETFLOW_STABLE_KEYSTORE_PASSWORD }}"
+              export SETFLOW_KEY_ALIAS="${{ secrets.SETFLOW_STABLE_KEY_ALIAS }}"
+              export SETFLOW_KEY_PASSWORD="${{ secrets.SETFLOW_STABLE_KEY_PASSWORD }}"
+            fi
+          fi
           VERSION="${GITHUB_REF_NAME#v}"
           ./gradlew assembleRelease :app:collectApks \
             -PappVersionName="$VERSION" \
