@@ -1,12 +1,24 @@
-# Builds and tests every push / pull request; a "v*" tag publishes signed APKs (arm64-v8a, armeabi-v7a, universal)
-# as a GitHub release with SHA256 checksums and zero network permissions.
+# SetFlow CI/CD Pipeline
+# Builds and tests every push / pull request on main, stage branches, and CI repair branches.
+# A "v*" tag publishes release APKs (arm64-v8a, armeabi-v7a, universal) with zero network permissions.
 name: SetFlow CI / CD
 
-on:
+'on':
   push:
-    branches: [master, main]
+    branches:
+      - main
+      - master
+      - 'stage-*'
+      - 'audit/*'
+      - 'ci/*'
     tags: ["v*"]
   pull_request:
+    branches:
+      - main
+      - master
+      - 'stage-*'
+      - 'ci/*'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -32,15 +44,24 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v6
 
+      - name: Compute artifact name
+        id: artifact_meta
+        shell: bash
+        run: |
+          REF_SLUG=$(echo "${{ github.ref_name }}" | tr '/' '-' | tr -cd '[:alnum:]-_')
+          SHA_SHORT=$(git rev-parse --short HEAD)
+          echo "name=setflow-debug-${REF_SLUG}-${SHA_SHORT}" >> "$GITHUB_OUTPUT"
+
       # Unit tests across automix (JVM) and app (Android unit tests)
       - name: Unit tests
+        id: unit_tests
         run: ./gradlew :automix:test :app:testDebugUnitTest --stacktrace --console=plain
 
       - name: Test reports
         if: ${{ failure() }}
         uses: actions/upload-artifact@v7
         with:
-          name: test-reports
+          name: test-reports-${{ steps.artifact_meta.outputs.name }}
           path: |
             base/**/build/reports/tests/
             base/**/build/test-results/
@@ -67,15 +88,27 @@ jobs:
           echo "Manifest security gate PASSED: 100% offline, zero network permissions."
 
       - name: Debug APK
+        id: debug_apk
         if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
-        run: ./gradlew assembleDebug
+        run: ./gradlew :app:assembleDebug --stacktrace --console=plain
 
-      - uses: actions/upload-artifact@v7
+      - name: Upload Debug APKs
         if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        uses: actions/upload-artifact@v7
         with:
-          name: setflow-debug
+          name: ${{ steps.artifact_meta.outputs.name }}
           path: base/app/build/outputs/apk/debug/*.apk
           retention-days: 14
+
+      - name: Report Build & Test Status Summary
+        if: always()
+        run: |
+          echo "### SetFlow CI Run Summary :rocket:" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit**: \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch / Ref**: \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Unit Tests (:automix:test & :app:testDebugUnitTest)**: ${{ steps.unit_tests.outcome == 'success' && ':white_check_mark: PASSED' || ':x: FAILED' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Debug APK Compilation (:app:assembleDebug)**: ${{ steps.debug_apk.outcome == 'success' && ':white_check_mark: PASSED' || (steps.debug_apk.outcome == 'skipped' && ':heavy_minus_sign: SKIPPED' || ':x: FAILED') }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Device Smoke / Runtime Tests**: :warning: NOT RUN (Unit test matrix only in CI runner)" >> $GITHUB_STEP_SUMMARY
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
@@ -104,10 +137,7 @@ jobs:
         working-directory: .
         run: python3 tools/check_tag.py "$GITHUB_REF_NAME"
 
-      # Two keys, one per channel (they install side by side as two apps):
-      # betas use SETFLOW_KEYSTORE_BASE64, SETFLOW_KEYSTORE_PASSWORD,
-      # SETFLOW_KEY_ALIAS, SETFLOW_KEY_PASSWORD; releases use the same names with
-      # SETFLOW_STABLE_ in front. Keep each key for good, or installed apps cannot update.
+      # Release keystores
       - name: Signing key
         env:
           BETA: ${{ contains(github.ref_name, '-') }}
