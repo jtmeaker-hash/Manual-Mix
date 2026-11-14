@@ -2,7 +2,7 @@
 
 ## Project Information
 - **Product Name**: SetFlow
-- **Version**: 0.14.0-stage14
+- **Version**: 0.15.0-beta.1
 - **License**: GNU General Public License v3.0 (GPL-3.0-only)
 - **Primary Package**: `app.setflow`
 - **Source Repository**: https://github.com/jtmeaker-hash/Manual-Mix

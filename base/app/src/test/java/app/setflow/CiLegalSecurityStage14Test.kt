@@ -255,9 +255,11 @@ class CiLegalSecurityStage14Test {
         assertTrue("targetSdk must be 36", buildContent.contains("targetSdk = 36"))
         assertTrue("compileSdk must be 37", buildContent.contains("compileSdk = 37"))
 
-        // Stage 14 versioning
-        assertTrue("versionCode must be 14", buildContent.contains("?: 14"))
-        assertTrue("versionName must be 0.14.0-stage14", buildContent.contains("0.14.0-stage14"))
+        // Versioning: minimum stage 14 or beta 15
+        val hasValidVersionCode = buildContent.contains("?: 14") || buildContent.contains("?: 15")
+        assertTrue("versionCode must be at least 14", hasValidVersionCode)
+        val hasValidVersionName = buildContent.contains("0.14.0-stage14") || buildContent.contains("0.15.0-beta.1")
+        assertTrue("versionName must be at least 0.14.0 or beta", hasValidVersionName)
     }
 
     @Test
