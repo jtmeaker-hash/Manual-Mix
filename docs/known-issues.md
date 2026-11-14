@@ -1,6 +1,6 @@
 # SetFlow Known Issues & Limitations
 
-## Version 0.15.0 (Beta Trial Freeze)
+## Version 1.0.0 (Stable Release)
 
 ### Supported Configurations
 - **Operating System**: Android 10 (API 29) through Android 15 (API 36).

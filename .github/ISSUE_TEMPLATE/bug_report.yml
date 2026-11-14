@@ -1,0 +1,68 @@
+name: Bug Report
+description: Report an issue or bug observed in SetFlow
+title: "[BUG]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting an issue in SetFlow!
+        **Privacy Warning**: SetFlow is a 100% offline, privacy-first DJ set builder. **DO NOT upload copyrighted music tracks, private personal audio files, tokens, or credentials.**
+  - type: input
+    id: version
+    attributes:
+      label: SetFlow Version
+      description: Exact app version (e.g., v1.0.0, build 16).
+      placeholder: "v1.0.0"
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Device & OS
+      description: Android device model and OS / API level.
+      placeholder: "Google Pixel 8, Android 15 (API 35)"
+    validations:
+      required: true
+  - type: dropdown
+    id: audio_format
+    attributes:
+      label: Audio Codec / Format Involved
+      description: The format of the local audio files in the set.
+      options:
+        - "FLAC (16/24-bit)"
+        - "WAV (PCM 16/24-bit)"
+        - "MP3 (CBR/VBR)"
+        - "AAC / M4A"
+        - "OGG Vorbis"
+        - "Other / Multiple"
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: Step-by-step description of how to trigger the issue.
+      placeholder: |
+        1. Import 5 tracks via SAF picker
+        2. Open transition editor between Track 1 and Track 2
+        3. Adjust exit anchor to 120.0s
+        4. Tap preview
+    validations:
+      required: true
+  - type: textarea
+    id: expected_vs_actual
+    attributes:
+      label: Expected vs Actual Behavior
+      description: What did you expect to happen, and what happened instead?
+      placeholder: "Expected seamless EQ crossfade preview; heard audio discontinuity or visible error message."
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Scrubbed Diagnostics Log
+      description: Redacted logs copied from Settings -> Diagnostics. Confirm all URIs and sensitive paths are redacted.
+      placeholder: "[REDACTED-PATH] / Sample Rate: 44100 / State: RUNNING"
+    validations:
+      required: false

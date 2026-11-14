@@ -15,14 +15,14 @@ android {
     namespace = "app.setflow"
     compileSdk = 37
 
-    val version = (findProperty("appVersionName") as String?) ?: "0.15.0-beta.1"
+    val version = (findProperty("appVersionName") as String?) ?: "1.0.0"
 
     defaultConfig {
         applicationId = "app.setflow"
         manifestPlaceholders["appLabel"] = "SetFlow"
         minSdk = 29
         targetSdk = 36
-        versionCode = (findProperty("appVersionCode") as String?)?.toIntOrNull() ?: 15
+        versionCode = (findProperty("appVersionCode") as String?)?.toIntOrNull() ?: 16
         versionName = version
         (findProperty("abis") as String?)?.let { ndk { abiFilters += it.split(",") } }
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -138,8 +138,8 @@ dependencies {
  */
 tasks.register("collectApks") {
     mustRunAfter("assembleRelease")
-    val version = (findProperty("appVersionName") as String?) ?: "0.15.0-beta.1"
-    val beta = findProperty("appVersionName") == null || version.contains("-beta")
+    val version = (findProperty("appVersionName") as String?) ?: "1.0.0"
+    val beta = version.contains("-beta")
     val app = when {
         findProperty("overDev") != null -> "SetFlow-dev"
         beta -> "SetFlow-Beta"

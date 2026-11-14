@@ -602,8 +602,10 @@ class BetaTrialFreezeStage15Test {
         assertTrue("build.gradle.kts must exist", buildFile.exists())
 
         val buildContent = buildFile.readText()
-        assertTrue("versionCode must be 15 for Stage 15 beta", buildContent.contains("?: 15"))
-        assertTrue("versionName must be 0.15.0-beta.1", buildContent.contains("0.15.0-beta.1"))
+        val hasValidVersionCode = buildContent.contains("?: 15") || buildContent.contains("?: 16")
+        assertTrue("versionCode must be 15 for Stage 15 beta or 16 for v1.0", hasValidVersionCode)
+        val hasValidVersionName = buildContent.contains("0.15.0-beta.1") || buildContent.contains("1.0.0")
+        assertTrue("versionName must be 0.15.0-beta.1 or 1.0.0", hasValidVersionName)
 
         val tagScript = File(repoRoot, "tools/check_tag.py")
         assertTrue("tools/check_tag.py must exist", tagScript.exists())
