@@ -257,10 +257,19 @@ object SetFlowSchemaAndMigrations {
 
     fun createDriver(dbFile: File, context: Context? = null): SetFlowSqlDriver {
         dbFile.parentFile?.mkdirs()
-        return if (Build.VERSION.SDK_INT > 0 && context != null) {
+        // On Android runtime (Build.VERSION.SDK_INT > 0) or whenever an Android Context is provided,
+        // use AndroidSqliteDriver backed by android.database.sqlite.SQLiteDatabase.
+        // On desktop JVM unit tests (SDK_INT == 0 without Context), use JdbcSqliteDriver with fallback.
+        val preferAndroid = Build.VERSION.SDK_INT > 0 || context != null
+        return if (preferAndroid) {
             AndroidSqliteDriver(dbFile)
         } else {
-            JdbcSqliteDriver(dbFile)
+            try {
+                JdbcSqliteDriver(dbFile)
+            } catch (_: ClassNotFoundException) {
+                // Defensive fallback: if sqlite-jdbc is absent, attempt AndroidSqliteDriver
+                AndroidSqliteDriver(dbFile)
+            }
         }
     }
 }

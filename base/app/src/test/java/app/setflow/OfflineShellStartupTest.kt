@@ -124,4 +124,51 @@ class OfflineShellStartupTest {
         assertTrue("Manifest must reference SetFlowApplication", xml.contains("app.setflow.SetFlowApplication"))
         assertTrue("Manifest must reference SetFlowActivity", xml.contains("app.setflow.ui.SetFlowActivity"))
     }
+
+    @Test
+    fun databaseDriverCreationDefaultsCleanlyOnJvmAndFallsBackSafely() {
+        val tempDb = File.createTempFile("driver_test_", ".sqlite").apply { deleteOnExit() }
+        val driver = app.setflow.db.SetFlowSchemaAndMigrations.createDriver(tempDb)
+        assertNotNull("Driver must be created", driver)
+        assertTrue("Driver must report read-write open mode", driver.openMode == app.setflow.db.DatabaseOpenMode.READ_WRITE)
+        assertEquals(app.setflow.db.SetFlowSchemaAndMigrations.CURRENT_SCHEMA_VERSION, driver.schemaVersion)
+    }
+
+    @Test
+    fun localOnlyShellServiceGraphWithContextParameterInstantiatesCleanly() {
+        val tempDir = File.createTempFile("graph_test_", "").apply { delete(); mkdirs() }
+        tempDir.deleteOnExit()
+        val services = LocalOnlyShellServiceGraph(
+            storageDirectory = tempDir,
+            context = null
+        )
+        assertNotNull(services.projectDatabase)
+        assertNotNull(services.trackLibrary)
+        assertNotNull(services.setRepository)
+        assertEquals(app.setflow.db.SetFlowSchemaAndMigrations.CURRENT_SCHEMA_VERSION, services.projectDatabase.schemaVersion)
+    }
+
+    @Test
+    fun wavWriterSummaryIdempotencePreservesSha256Digest() {
+        val tempWav = File.createTempFile("wav_summary_test_", ".wav").apply { deleteOnExit() }
+        val writer = app.setflow.export.WavWriter(tempWav, sampleRate = 44100, channels = 2)
+        val dummySamples = FloatArray(1024) { 0.25f }
+        writer.writeFrames(dummySamples, 512)
+        val s1 = writer.finalizeHeader()
+        val s2 = writer.finalizeHeader()
+        assertEquals("Summary SHA-256 must be identical across repeated calls", s1.sha256Hex, s2.sha256Hex)
+        assertFalse("SHA-256 must not be empty-buffer digest", s1.sha256Hex == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+        writer.close()
+    }
+
+    @Test
+    fun setPlaybackServiceSecurityAndNotificationIconSafety() {
+        val serviceFile = File("src/main/java/app/setflow/playback/SetPlaybackService.kt")
+        assertTrue("SetPlaybackService.kt must exist", serviceFile.exists())
+        val code = serviceFile.readText()
+        assertTrue("Notification small icon must be monochrome drawable, not adaptive mipmap",
+            code.contains("R.drawable.ic_launcher_monochrome") && !code.contains("setSmallIcon(R.mipmap.ic_launcher)"))
+        assertTrue("Noisy receiver must be registered as NOT_EXPORTED",
+            code.contains("ContextCompat.RECEIVER_NOT_EXPORTED") && !code.contains("ContextCompat.RECEIVER_EXPORTED"))
+    }
 }

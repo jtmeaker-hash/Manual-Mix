@@ -37,6 +37,7 @@ class WavWriter(
         private set
 
     private var isFinalized: Boolean = false
+    private var cachedSummary: WavExportSummary? = null
     private val byteBuffer = ByteBuffer.allocate(8192 * bytesPerFrame).order(ByteOrder.LITTLE_ENDIAN)
 
     init {
@@ -153,9 +154,10 @@ class WavWriter(
     }
 
     private fun summary(): WavExportSummary {
+        cachedSummary?.let { return it }
         val hashHex = digest.digest().joinToString("") { "%02x".format(it) }
         val durationUs = (totalFramesWritten * 1_000_000L) / sampleRate
-        return WavExportSummary(
+        val res = WavExportSummary(
             destinationPath = destinationFile.absolutePath,
             sampleRate = sampleRate,
             channels = channels,
@@ -167,6 +169,8 @@ class WavWriter(
             nonFiniteSamples = nonFiniteSamplesCount,
             sha256Hex = hashHex
         )
+        cachedSummary = res
+        return res
     }
 
     override fun close() {

@@ -73,13 +73,14 @@ object TrackDecoder {
             val float = encoding == AudioFormat.ENCODING_PCM_FLOAT
             if (!float && encoding != AudioFormat.ENCODING_PCM_16BIT) throw IOException("unsupported decoded PCM")
             val values = buffer.remaining() / (if (float) 4 else 2)
-            val frames = values / channels
+            val safeChannels = channels.coerceAtLeast(1)
+            val frames = values / safeChannels
             if (float) { if (floats.size < values) floats = FloatArray(values); buffer.asFloatBuffer().get(floats, 0, values) }
             else { if (shorts.size < values) shorts = ShortArray(values); buffer.asShortBuffer().get(shorts, 0, values) }
             for (i in 0 until frames) {
-                val at = i * channels
+                val at = i * safeChannels
                 val l = if (float) floats[at] else shorts[at] / 32768f
-                val r = if (channels == 1) l else if (float) floats[at + 1] else shorts[at + 1] / 32768f
+                val r = if (safeChannels == 1) l else if (float) floats[at + 1] else shorts[at + 1] / 32768f
                 out.push(if (l.isFinite()) l else 0f, if (r.isFinite()) r else 0f)
             }
         }

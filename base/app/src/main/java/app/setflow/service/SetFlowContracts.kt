@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 package app.setflow.service
 
+import android.content.Context
 import app.setflow.db.ProjectBackupManager
 import app.setflow.db.ProjectDetailSnapshot
 import app.setflow.db.SetFlowProjectDatabase
@@ -252,7 +253,8 @@ class LocalOnlyShellServiceGraph(
     modelAssetPresent: Boolean = true,
     modelAssetBytes: Long = 5_596_894L,
     sourceProvider: TrackSourceProvider = VirtualSafTrackSourceProvider(),
-    storageDirectory: File? = null
+    storageDirectory: File? = null,
+    val context: Context? = null
 ) : SetFlowServiceBoundary {
 
     override val diagnostics = DiagnosticsRingBuffer(capacity = 128)
@@ -264,7 +266,7 @@ class LocalOnlyShellServiceGraph(
     } ?: File.createTempFile("setflow_shell_db_", ".sqlite").apply { deleteOnExit() }
 
     override val projectDatabase: SetFlowProjectDatabase = SetFlowProjectDatabase(
-        driver = SetFlowSchemaAndMigrations.createDriver(dbFile),
+        driver = SetFlowSchemaAndMigrations.createDriver(dbFile, context),
         diagnostics = diagnostics
     )
 
@@ -296,6 +298,7 @@ class LocalOnlyShellServiceGraph(
     )
 
     private val beatModelProvider: app.setflow.analysis.BeatThisModelProvider = app.setflow.analysis.BeatThisModelProvider(
+        context = context,
         modelAssetPath = MODEL_ASSET_RELATIVE_PATH,
         diagnostics = diagnostics
     )

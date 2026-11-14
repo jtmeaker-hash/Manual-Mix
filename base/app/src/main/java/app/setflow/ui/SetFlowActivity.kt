@@ -53,7 +53,7 @@ class SetFlowActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        val appServices = (application as? SetFlowApplication)?.services ?: LocalOnlyShellServiceGraph()
+        val appServices = (application as? SetFlowApplication)?.services ?: LocalOnlyShellServiceGraph(context = this)
         shellViewModel = ViewModelProvider(
             this,
             SetFlowShellViewModel.Factory(appServices)

@@ -323,7 +323,11 @@ class SetPlaybackQueueController(
                 if (twoDeckController.state.value.phase == SchedulerPhase.COMPLETE || sourcePositionUsA >= exitAnchorUs + edgeSlot.spanUs) {
                     // Handoff complete! Advance to next occurrence
                     val nextIndex = index + 1
-                    val nextSlot = timeline.occurrenceSlots[nextIndex]
+                    val nextSlot = timeline.occurrenceSlots.getOrNull(nextIndex)
+                    if (nextSlot == null) {
+                        completeSet()
+                        return true
+                    }
                     diagnostics.record(
                         category = "SetQueue",
                         phase = SchedulerPhase.COMPLETE,
