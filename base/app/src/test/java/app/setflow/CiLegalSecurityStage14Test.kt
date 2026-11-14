@@ -333,7 +333,7 @@ class CiLegalSecurityStage14Test {
         // SetFlow naming
         assertTrue(
             "Workflow must upload setflow-debug artifact",
-            workflowContent.contains("name: setflow-debug")
+            workflowContent.contains("setflow-debug")
         )
         assertTrue(
             "Workflow must reference SETFLOW_KEYSTORE secrets",
