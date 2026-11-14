@@ -34,6 +34,11 @@ def check(tag, others):
         k = key(other)
         if k is None or other == tag:
             continue  # older tags in another format are not compared
+        # Upstream Myspoti legacy tags are v2.0.0 through v2.4.x, whereas SetFlow
+        # versioning starts at v1.0.0. If the tag under test is a SetFlow v1 tag
+        # (mine[0] <= 1), ignore upstream legacy tags where k[0] > 1.
+        if mine[0] <= 1 and k[0] > 1:
+            continue
         if (not stable or k[3] == 1) and k >= mine:
             return (f'"{tag}" must be newer than the existing "{other}": a beta follows the last stable '
                     f'(2.2.0 -> 2.2.1-beta.1 or 2.3.0-beta.1, then beta.2...), a stable follows its betas.')
